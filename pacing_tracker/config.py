@@ -78,11 +78,26 @@ THRESHOLDS = {
     "far_out_hold_ly_threshold_pct": 85,
     "far_out_hold_booking_window_multiple": 2,
     "far_out_hold_max_behind_pace": 10,
-    # Visual-only banding for the Mkt Occ % LY column -- distinct from
-    # weekday_ly_cut_pct/weekend_ly_cut_pct above (those drive the Suggested
-    # Bump ladder; these two just color the LY cell red/green in the sheet).
-    "ly_occ_visual_red_below": 25,
-    "ly_occ_visual_green_above": 75,
+    # Visual-only banding for the Mkt Occ % LY column (F), weekday and
+    # weekend scaled separately -- a flat threshold doesn't work here since
+    # the two distributions sit in very different ranges (live account,
+    # 2026-09-20, the pacing tracker's own 366-day forward window: weekday
+    # median 37%/mean 41%, n=262; weekend median 65%/mean 64%, n=104).
+    # weekday_ly_cut_pct/weekend_ly_cut_pct above double as this column's
+    # "low" tier boundary -- both already sit at roughly the bottom ~20th
+    # percentile for their day type, which is exactly what a "low" tier
+    # should mean, so there's no reason for a second, disconnected number.
+    # severe/below-avg/high are new, chosen to land at roughly the same
+    # percentiles on both sides (severe ~3-7%, below-avg ~33-35%, high
+    # ~top 8-16%) rather than reusing the flat 25%/75% the reference file
+    # used, which put weekday's old "high" tier at the top ~5% but
+    # weekend's at the top ~36% -- one rare and notable, the other not.
+    "ly_weekday_severe_below": 20,
+    "ly_weekday_below_avg_below": 30,
+    "ly_weekday_high_above": 70,
+    "ly_weekend_severe_below": 30,
+    "ly_weekend_below_avg_below": 50,
+    "ly_weekend_high_above": 90,
 }
 
 # --- Median booking window by month (spec: re-paste periodically) -----------

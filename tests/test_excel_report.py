@@ -219,7 +219,7 @@ class BuildWorkbookTest(unittest.TestCase):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
         ws = wb["Daily Pacing"]
         self.assertEqual(ws["AA2"].value, config.THRESHOLDS["pace_threshold"])
-        self.assertEqual(ws["AA8"].value, config.THRESHOLDS["ly_occ_visual_red_below"])
+        self.assertEqual(ws["AA8"].value, config.THRESHOLDS["ly_weekday_severe_below"])
         self.assertEqual(ws["AA30"].value, config.THRESHOLDS["far_out_hold_max_behind_pace"])
 
     def test_booking_window_sheet_matches_config(self):
@@ -228,6 +228,29 @@ class BuildWorkbookTest(unittest.TestCase):
         self.assertEqual(ws["A2"].value, 1)
         self.assertEqual(ws["B2"].value, "Jan")
         self.assertEqual(ws["C2"].value, config.MEDIAN_BOOKING_WINDOW_BY_MONTH[1])
+
+    def test_mkt_occ_ly_bands_are_weekday_weekend_aware(self):
+        # 2026-09-20: a flat threshold doesn't work for F -- weekday and
+        # weekend LY occupancy sit in genuinely different ranges on the
+        # live account. Each day type gets 4 bounded (non-overlapping)
+        # bands so exactly one rule ever matches a given cell.
+        wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
+        ws = wb["Daily Pacing"]
+        formulas = [
+            rule.formula[0]
+            for rng, rules in ws.conditional_formatting._cf_rules.items()
+            if str(rng.sqref).startswith("F2")
+            for rule in rules
+        ]
+        self.assertEqual(len(formulas), 8)
+        weekday_formulas = [f for f in formulas if "NOT(OR(ISNUMBER" in f]
+        weekend_formulas = [f for f in formulas if f not in weekday_formulas]
+        self.assertEqual(len(weekday_formulas), 4)
+        self.assertEqual(len(weekend_formulas), 4)
+        for f in weekday_formulas:
+            self.assertTrue(any(f"$AA${row}" in f for row in (8, 9, 10, 23)))
+        for f in weekend_formulas:
+            self.assertTrue(any(f"$AA${row}" in f for row in (11, 12, 13, 24)))
 
     def test_conditional_format_fills_use_bgcolor_not_fgcolor(self):
         # Regression test: Excel/Google Sheets read a conditional format's

@@ -47,6 +47,13 @@ stays traceable (matches the spec's own "(decided 9/11/26)" convention):
   config.DAILY_REVIEW_STEPS) as one filterable label, and a "Daily Review
   Steps" tab documenting that routine in full (including step 7, which
   isn't computed here since it needs a look across neighboring dates).
+- 2026-09-20: Mkt Occ % LY (F) went from a single flat red/green threshold
+  (25%/75%) to four weekday/weekend-specific bands (severe/low/below-avg/
+  high). The reference file's flat 75% "high" cutoff sat at the top ~5% of
+  weekdays but the top ~36% of weekends -- a live-data check of the
+  account's own LY distribution (see the THRESHOLDS comment in config.py)
+  found the two day types' occupancy sit in genuinely different ranges, so
+  one number can't mean the same thing for both.
 """
 
 import argparse
@@ -110,10 +117,14 @@ THRESHOLD_ROWS = [
     (5, "Pickup 14d >", "pickup_14d_threshold"),
     (6, "Pickup 30d >", "pickup_30d_threshold"),
     (7, "Pickup 60d >", "pickup_60d_threshold"),
-    (8, "LY Occ Red <", "ly_occ_visual_red_below"),
-    (9, "LY Occ Green >", "ly_occ_visual_green_above"),
-    (23, "Weekday LY cut <", "weekday_ly_cut_pct"),
-    (24, "Weekend LY cut <", "weekend_ly_cut_pct"),
+    (8, "Weekday LY severe <", "ly_weekday_severe_below"),
+    (9, "Weekday LY below-avg <", "ly_weekday_below_avg_below"),
+    (10, "Weekday LY high >", "ly_weekday_high_above"),
+    (11, "Weekend LY severe <", "ly_weekend_severe_below"),
+    (12, "Weekend LY below-avg <", "ly_weekend_below_avg_below"),
+    (13, "Weekend LY high >", "ly_weekend_high_above"),
+    (23, "Weekday LY cut / low tier <", "weekday_ly_cut_pct"),
+    (24, "Weekend LY cut / low tier <", "weekend_ly_cut_pct"),
     (25, "Low-LY override: Pace >=", "low_ly_override_pace"),
     (26, "High-LY raise-ease LY >=", "high_ly_raise_ease_threshold_pct"),
     (27, "High-LY raise-ease ratio bar", "high_ly_raise_ease_ratio_bar"),
@@ -388,9 +399,38 @@ def _apply_conditional_formatting(ws, last_row):
     ws.conditional_formatting.add(g_range, FormulaRule(formula=["AND(G2>$AA$2,G2<=2*$AA$2)"], fill=fmt("light_green")))
     ws.conditional_formatting.add(g_range, FormulaRule(formula=["G2>2*$AA$2"], fill=fmt("dark_green")))
 
+    # Mkt Occ % LY (F) is banded weekday vs weekend separately -- see the
+    # THRESHOLDS comment in config.py for why a flat threshold doesn't work
+    # here. Each day type's four bands are bounded on both sides so exactly
+    # one rule ever matches a given cell (same approach as the G/Pace vs
+    # STLY bands below), rather than relying on rule priority/stacking.
     f_range = f"F2:F{last_row}"
-    ws.conditional_formatting.add(f_range, FormulaRule(formula=["F2<$AA$8"], fill=fmt("salmon")))
-    ws.conditional_formatting.add(f_range, FormulaRule(formula=["F2>$AA$9"], fill=fmt("med_green")))
+    not_weekend = f"NOT({_weekend_fragment('B2')})"
+    is_weekend = _weekend_fragment("B2")
+    ws.conditional_formatting.add(
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2<$AA$8)"], fill=fmt("dark_red"))
+    )
+    ws.conditional_formatting.add(
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>=$AA$8,F2<$AA$23)"], fill=fmt("orange"))
+    )
+    ws.conditional_formatting.add(
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>=$AA$23,F2<$AA$9)"], fill=fmt("light_gold"))
+    )
+    ws.conditional_formatting.add(
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>$AA$10)"], fill=fmt("med_green"))
+    )
+    ws.conditional_formatting.add(
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2<$AA$11)"], fill=fmt("dark_red"))
+    )
+    ws.conditional_formatting.add(
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>=$AA$11,F2<$AA$24)"], fill=fmt("orange"))
+    )
+    ws.conditional_formatting.add(
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>=$AA$24,F2<$AA$12)"], fill=fmt("light_gold"))
+    )
+    ws.conditional_formatting.add(
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>$AA$13)"], fill=fmt("med_green"))
+    )
 
     op_range = f"O2:P{last_row}"
     ws.conditional_formatting.add(op_range, FormulaRule(formula=['ISNUMBER(SEARCH("Mixed",O2))'], fill=fmt("light_grey")))
