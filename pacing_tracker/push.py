@@ -19,16 +19,38 @@ merges price/price_type/reason on top of whatever's already set, rather
 than sending a bare {date, price} object that would silently wipe the
 rest. This means even a --dry-run makes read-only GET calls (to compute
 an accurate preview) -- never a write.
+
+Clearing a suggestion: blanking Override Request (and Notes) is how the
+user's own review routine says "remove my override request" for a date.
+Confirmed live on 2026-09-22 that PriceLabs' update endpoint does NOT
+clear price when it's simply left out of the payload -- the old value
+stays untouched -- so a blanked Q silently did nothing on PriceLabs' side
+even though the sheet looked clean. find_cleared_dates() compares against
+the *previous day's saved workbook* (not just "is Q blank now") so this
+only ever acts on a date this tool itself previously set an override for
+-- it never touches a date it was never asked to manage, e.g. one a human
+set directly in the PriceLabs dashboard. For a cleared date, this either
+neutralizes the price to "0" (if the existing override also carries
+something else worth keeping, like min_stay -- confirmed live that a full
+delete wipes ALL of a date's fields, not just price) or fully deletes it
+via delete_listing_date_overrides (if price/reason were the only things
+on it).
 """
 
 import argparse
+import os
 from datetime import date
 
 import openpyxl
 
 from . import config
 from .api_client import PriceLabsClient
-from .carryforward import find_latest_file
+from .carryforward import find_latest_file, load_previous_state_for_folder, parse_filename_date
+
+# Fields a bare {date, price, price_type, reason} override always carries
+# -- anything else present (min_stay, min/max price, check-in/out rules,
+# ...) is something a full delete would destroy alongside the price.
+_OVERRIDE_META_KEYS = {"date", "price", "price_type", "reason", "created_at", "updated_at", "currency"}
 
 REASON_MAX_LEN = 255
 
@@ -78,6 +100,49 @@ def read_planned_overrides(workbook_path, as_of=None):
     return planned
 
 
+def find_cleared_dates(workbook_path, as_of=None):
+    """[date_str, ...] for every date whose Override Request is blank now
+    but held a real value in the previous day's saved workbook -- the
+    signal that the user explicitly removed a suggestion, which looks
+    identical to "never had one" from this file alone. Returns [] (rather
+    than erroring) when there's no previous file to compare against, e.g.
+    the very first run.
+    """
+    as_of = as_of or date.today()
+    folder = os.path.dirname(workbook_path) or "."
+    file_date = parse_filename_date(os.path.basename(workbook_path)) or as_of
+    previous_state = load_previous_state_for_folder(folder, file_date)
+    if not previous_state:
+        return []
+
+    wb = openpyxl.load_workbook(workbook_path, data_only=True)
+    ws = wb["Daily Pacing"]
+    cleared = []
+    for row in ws.iter_rows(min_row=2):
+        row_date = row[COL_DATE].value
+        if row_date is None:
+            continue
+        row_date = row_date.date() if hasattr(row_date, "date") else row_date
+        if row_date < as_of:
+            continue
+        if row[COL_OVERRIDE_REQUEST].value not in (None, ""):
+            continue
+        prev = previous_state.get(row_date.isoformat(), {})
+        if prev.get("override_request") not in (None, ""):
+            cleared.append(row_date.isoformat())
+    return cleared
+
+
+def _has_other_fields(existing):
+    """True if this override carries anything beyond price/reason
+    bookkeeping -- min_stay, min/max price, check-in/out rules, etc. --
+    that a full delete would destroy alongside the price. Confirmed live
+    (2026-09-22) that delete_listing_date_overrides removes the WHOLE
+    date's override, not just price.
+    """
+    return any(key not in _OVERRIDE_META_KEYS for key in existing)
+
+
 def _merge_override(existing, target_date, price, reason):
     """Keeps every field already set on this date's override (min_stay,
     min/max price, check-in/out rules, etc.) and only replaces
@@ -93,18 +158,20 @@ def _merge_override(existing, target_date, price, reason):
     return merged
 
 
-def push_overrides(client, planned, listings=None, dry_run=True):
+def push_overrides(client, planned, cleared_dates=None, listings=None, dry_run=True):
     """Returns [(listing_name, override_dict), ...] -- what was (dry_run)
-    or would be (not dry_run) sent, for the caller to print/log. Read-only
-    GET calls happen either way, to compute an accurate merge preview;
-    the mutating call only happens when dry_run is False.
+    or would be (not dry_run) sent, for the caller to print/log. A cleared
+    date's dict has "deleted": True instead of a price. Read-only GET
+    calls happen either way, to compute an accurate merge preview; the
+    mutating calls only happen when dry_run is False.
     """
     listings = listings if listings is not None else config.LISTINGS
+    cleared_dates = cleared_dates or []
     planned_by_date = {p["date"]: p for p in planned}
     results = []
 
     for listing in listings:
-        if not planned_by_date:
+        if not planned_by_date and not cleared_dates:
             continue
 
         existing_resp = client.get_listing_date_overrides(listing["listing_id"], listing["pms"])
@@ -117,8 +184,23 @@ def push_overrides(client, planned, listings=None, dry_run=True):
             overrides_to_send.append(merged)
             results.append((listing["name"], merged))
 
+        dates_to_delete = []
+        for cleared_date in cleared_dates:
+            existing = existing_by_date.get(cleared_date)
+            if existing is None:
+                continue  # nothing live to clear -- already consistent
+            if _has_other_fields(existing):
+                merged = _merge_override(existing, cleared_date, "0", "")
+                overrides_to_send.append(merged)
+                results.append((listing["name"], merged))
+            else:
+                dates_to_delete.append(cleared_date)
+                results.append((listing["name"], {"date": cleared_date, "deleted": True}))
+
         if overrides_to_send and not dry_run:
             client.update_listing_date_overrides(listing["listing_id"], listing["pms"], overrides_to_send)
+        if dates_to_delete and not dry_run:
+            client.delete_listing_date_overrides(listing["listing_id"], listing["pms"], dates_to_delete)
 
     return results
 
@@ -160,17 +242,21 @@ def main():
         print(f"Using most recent workbook: {workbook_path}")
 
     planned = read_planned_overrides(workbook_path)
-    if not planned:
+    cleared = find_cleared_dates(workbook_path)
+    if not planned and not cleared:
         print("No overrides to push (Override Request is blank for every row, or all such dates are in the past).")
         return
 
     client = PriceLabsClient()
-    results = push_overrides(client, planned, listings=listings, dry_run=not args.confirm)
+    results = push_overrides(client, planned, cleared_dates=cleared, listings=listings, dry_run=not args.confirm)
 
     mode = "LIVE PUSH" if args.confirm else "DRY RUN -- nothing was sent; pass --confirm to push for real"
     print(f"=== {mode}: {len(results)} override(s) across {len(listings)} listing(s) ===")
     for listing_name, override in results:
-        print(f"{listing_name} | {override['date']} | price={override['price']}% | reason={override['reason']!r}")
+        if override.get("deleted"):
+            print(f"{listing_name} | {override['date']} | DELETE (no other fields worth keeping)")
+        else:
+            print(f"{listing_name} | {override['date']} | price={override['price']}% | reason={override['reason']!r}")
 
 
 if __name__ == "__main__":

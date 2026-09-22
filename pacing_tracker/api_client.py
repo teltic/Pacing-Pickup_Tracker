@@ -48,6 +48,8 @@ class PriceLabsClient:
                     continue
                 if not resp.ok:
                     raise PriceLabsAPIError(f"{resp.status_code} from {url}: {resp.text[:500]}")
+                if not resp.content:
+                    return {}  # e.g. a 204 No Content from DELETE
                 return resp.json()
             except requests.RequestException as exc:
                 last_error = PriceLabsAPIError(f"Request to {url} failed: {exc}")
@@ -59,6 +61,9 @@ class PriceLabsClient:
 
     def _post(self, path, json_body=None):
         return self._request("POST", path, json_body=json_body)
+
+    def _delete(self, path, json_body=None):
+        return self._request("DELETE", path, json_body=json_body)
 
     def get_report_builder_templates(self):
         return self._get("report_builder/templates")
@@ -79,3 +84,13 @@ class PriceLabsClient:
 
     def update_listing_date_overrides(self, listing_id, pms, overrides):
         return self._post(f"listings/{listing_id}/overrides", json_body={"pms": pms, "overrides": overrides})
+
+    def delete_listing_date_overrides(self, listing_id, pms, dates):
+        """Fully removes the override for each date (reverts to standard
+        algorithmic pricing) -- confirmed live that this wipes ALL of a
+        date's fields (min_stay, min/max price, etc.), not just price. Only
+        safe to call for a date whose existing override has nothing else
+        worth keeping; see push.py's _has_other_fields.
+        """
+        overrides = [{"date": d} for d in dates]
+        return self._delete(f"listings/{listing_id}/overrides", json_body={"pms": pms, "overrides": overrides})

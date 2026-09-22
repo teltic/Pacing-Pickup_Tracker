@@ -161,8 +161,17 @@ rendered invisibly. Fixed and covered by a regression test.
 date-specific `price_type: "percent"` overrides, per the spec's push
 workflow:
 
-- Blank Override Request cells and any date already in the past are
-  skipped.
+- Blank Override Request cells that have *always* been blank, and any
+  date already in the past, are skipped.
+- A cell that's blank **now** but held a real value in the previous day's
+  saved workbook is treated as "remove my override request" -- confirmed
+  live (2026-09-22) that PriceLabs' update endpoint does NOT clear price
+  just because it's left out of a request, so this actively clears it:
+  either neutralizing the price to 0% (if the live override also carries
+  something else worth keeping, like `min_stay`) or fully deleting it (if
+  price/reason were the only things set). This only ever touches a date
+  this tool itself previously pushed an override for -- never a date a
+  human set directly in the PriceLabs dashboard.
 - Pushed to **both** configured listings by default (`--listing-id` to
   restrict to one) — Pace/Pickup are market-level signals shared by both
   listings, not listing-specific.
