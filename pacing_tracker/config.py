@@ -98,6 +98,11 @@ THRESHOLDS = {
     "ly_weekend_severe_below": 30,
     "ly_weekend_below_avg_below": 50,
     "ly_weekend_high_above": 90,
+    # How many days a note can sit before Review Bucket calls it out again.
+    # Reads the note's own leading "M/D - ..." date (the convention the
+    # user's notes and Suggested Note both already use), so this needs no
+    # separate "reviewed until" field to maintain by hand.
+    "note_stale_after_days": 14,
 }
 
 # --- Median booking window by month (spec: re-paste periodically) -----------

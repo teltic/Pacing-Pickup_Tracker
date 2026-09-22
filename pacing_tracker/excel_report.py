@@ -66,6 +66,13 @@ stays traceable (matches the spec's own "(decided 9/11/26)" convention):
   for a fully-booked date (matching Signal/Suggested Bump), instead of
   still routing it into a bucket when there's no pricing decision left to
   make.
+- 2026-09-26: added a "Stale Note" tier to Review Bucket, between Override
+  Normalized and Low LY. Rather than a separate manually-maintained
+  "reviewed until" field, it reads the note's own leading "M/D - ..."
+  date -- a convention the user's notes and Suggested Note already both
+  use -- and flags it once $AA$14 (default 14) days have passed. A note
+  that doesn't start with that exact pattern is treated as "not stale"
+  rather than erroring.
 """
 
 import argparse
@@ -135,6 +142,7 @@ THRESHOLD_ROWS = [
     (11, "Weekend LY severe <=", "ly_weekend_severe_below"),
     (12, "Weekend LY below-avg <=", "ly_weekend_below_avg_below"),
     (13, "Weekend LY high >=", "ly_weekend_high_above"),
+    (14, "Note stale after (days)", "note_stale_after_days"),
     (23, "Weekday LY cut / low tier <", "weekday_ly_cut_pct"),
     (24, "Weekend LY cut / low tier <", "weekend_ly_cut_pct"),
     (25, "Low-LY override: Pace >=", "low_ly_override_pace"),
@@ -258,6 +266,26 @@ def _new_since_last_review_formula(r, previous_signal):
     )
 
 
+def _stale_note_condition(r):
+    """True when Notes' own leading "M/D - ..." date (the convention the
+    user's notes and Suggested Note already both use) is $AA$14+ days old.
+    Picks whichever of this year's or last year's M/D isn't in the future,
+    so a note from December still ages correctly when reviewed in January.
+    A note that doesn't start with that exact pattern (blank, freeform
+    text) safely evaluates to "not stale" via IFERROR rather than an
+    error propagating into Review Bucket.
+    """
+    note = f"{COL['notes']}{r}"
+    sep = f'FIND(" - ",{note})'
+    prefix = f"LEFT({note},{sep}-1)"
+    slash = f'FIND("/",{prefix})'
+    note_month = f"VALUE(LEFT({prefix},{slash}-1))"
+    note_day = f"VALUE(MID({prefix},{slash}+1,LEN({prefix})-{slash}))"
+    this_year_date = f"DATE(YEAR(TODAY()),{note_month},{note_day})"
+    note_date = f"IF({this_year_date}>TODAY(),DATE(YEAR(TODAY())-1,{note_month},{note_day}),{this_year_date})"
+    return f"IFERROR(TODAY()-{note_date}>=$AA$14,FALSE())"
+
+
 def _review_bucket_formula(r):
     """Single filterable label per row, mirroring the user's own daily
     review order (see config.DAILY_REVIEW_STEPS / the "Daily Review Steps"
@@ -278,17 +306,19 @@ def _review_bucket_formula(r):
     # silently under-counted weekday High LY dates against the 70%
     # weekday actually uses everywhere else.
     high_ly = f"IF({weekend},{f}>=$AA$13,{f}>=$AA$10)"
+    stale_note = _stale_note_condition(r)
     return (
         f'=IF({occ}=100,"✓ Booked",'
         f'IF({x}="NEW","1. New",'
         f'IF({w}="Review - pace normalized","2. Override Normalized",'
+        f'IF({stale_note},"2. Stale Note ("&$AA$14&"+d)",'
         f'IF({low_ly},"3. Low LY",'
         f'IF({high_ly},"3. High LY",'
         f'IF({m}>2,"4. Pace >10%",'
         f'IF({m}>1,"4. Pace 5-10%",'
         f'IF({n}>1,"5. Pickup Spike",'
         f'IF(AND({t}>=0,{t}<={u}),"6. Within Window",'
-        '"")))))))))'
+        '""))))))))))'
     )
 
 

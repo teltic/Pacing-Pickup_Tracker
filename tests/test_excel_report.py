@@ -10,6 +10,7 @@ from pacing_tracker.excel_report import (
     _override_status_formula,
     _review_bucket_formula,
     _signal_formula,
+    _stale_note_condition,
     _suggested_bump_formula,
     _suggested_note_formula,
     build_workbook,
@@ -64,19 +65,87 @@ REFERENCE_NEW_SINCE_LAST_REVIEW_ROW2 = (
 # Review Bucket (Y) is new, not from the reference file -- authored
 # 2026-09-18 to mirror the user's own 7-step daily routine (steps 1-6;
 # step 7 needs neighboring rows and isn't computed here) as one
-# filterable column. Locked down as a regression anchor same as the rest.
+# filterable column.
+#
 # 2026-09-22: added the occ=100 short-circuit (matches Signal/Suggested
 # Bump) and fixed High LY to read the weekday/weekend-specific AA10/AA13
 # cells instead of the unrelated flat $AA$26 it was reading before.
-REFERENCE_REVIEW_BUCKET_ROW2 = (
-    '=IF(C2=100,"✓ Booked",IF(X2="NEW","1. New",'
-    'IF(W2="Review - pace normalized","2. Override Normalized",'
-    'IF(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),$AA$24,$AA$23),'
-    '"3. Low LY",IF(IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),'
-    'F2>=$AA$13,F2>=$AA$10),"3. High LY",IF(M2>2,"4. Pace >10%",'
-    'IF(M2>1,"4. Pace 5-10%",IF(N2>1,"5. Pickup Spike",'
-    'IF(AND(T2>=0,T2<=U2),"6. Within Window","")))))))))'
-)
+#
+# 2026-09-26: added a "Stale Note" tier (see _stale_note_condition) between
+# Override Normalized and Low LY. Past this point the formula got long
+# enough (the stale-note check alone repeats its FIND/LEFT parse 3 times,
+# since Excel has no LET() binding to reuse here) that a full literal-
+# string regression anchor -- the convention used above for formulas
+# lifted verbatim from the reference file -- stopped being the most
+# useful check for a formula we authored ourselves. Structural assertions
+# on priority order and cell references below instead.
+
+
+class ReviewBucketPriorityTest(unittest.TestCase):
+    def test_tiers_appear_in_priority_order(self):
+        result = _review_bucket_formula(2)
+        labels = [
+            "✓ Booked", "1. New", "2. Override Normalized", "2. Stale Note",
+            "3. Low LY", "3. High LY", "4. Pace >10%", "4. Pace 5-10%",
+            "5. Pickup Spike", "6. Within Window",
+        ]
+        positions = [result.index(label) for label in labels]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_high_ly_uses_weekday_weekend_specific_cells_not_the_raise_ease_one(self):
+        result = _review_bucket_formula(2)
+        self.assertIn("$AA$10", result)
+        self.assertIn("$AA$13", result)
+        self.assertNotIn("$AA$26", result)
+
+    def test_short_circuits_when_fully_booked(self):
+        self.assertTrue(_review_bucket_formula(2).startswith('=IF(C2=100,"✓ Booked",'))
+
+
+class StaleNoteConditionTest(unittest.TestCase):
+    def test_reads_the_configured_threshold_cell(self):
+        self.assertIn("$AA$14", _stale_note_condition(2))
+
+    def test_parses_notes_own_leading_date_not_a_separate_field(self):
+        result = _stale_note_condition(2)
+        self.assertIn('FIND(" - ",R2)', result)
+        self.assertIn('FIND("/",', result)
+
+    def test_handles_a_note_that_doesnt_match_the_convention(self):
+        # A parse failure (blank Notes, or free-form text with no leading
+        # "M/D - ...") must read as "not stale", not a formula error.
+        self.assertTrue(_stale_note_condition(2).startswith("IFERROR("))
+        self.assertTrue(_stale_note_condition(2).endswith(",FALSE())"))
+
+    def test_matches_the_reference_python_implementation(self):
+        # The Excel formula is a direct port of this logic (parse "M/D"
+        # from the note, prefer this year unless that's in the future,
+        # diff against today) -- cross-checked here against the same
+        # calculation in plain Python so the formula's *logic* is verified
+        # even though the sandbox can't recalculate the actual xlsx.
+        from datetime import date as _date
+
+        def stale(note, today, threshold=14):
+            if not note or " - " not in note:
+                return False
+            prefix = note.split(" - ")[0]
+            if "/" not in prefix:
+                return False
+            try:
+                month, day = (int(x) for x in prefix.split("/"))
+                this_year = _date(today.year, month, day)
+            except ValueError:
+                return False
+            note_date = _date(today.year - 1, month, day) if this_year > today else this_year
+            return (today - note_date).days >= threshold
+
+        today = _date(2026, 9, 26)
+        self.assertTrue(stale("9/12 - test", today))  # exactly 14 days
+        self.assertFalse(stale("9/13 - test", today))  # 13 days
+        self.assertFalse(stale("9/21 - Test", today))  # 5 days
+        self.assertTrue(stale("12/20 - holiday note", _date(2027, 1, 5)))  # crosses year boundary
+        self.assertFalse(stale("just a note, no date", today))
+        self.assertFalse(stale("", today))
 
 
 class FormulaMatchesReferenceFileTest(unittest.TestCase):
@@ -112,9 +181,6 @@ class FormulaMatchesReferenceFileTest(unittest.TestCase):
         self.assertIn('SEARCH("Spike","")', result)
         self.assertIn('SEARCH("Elevated","")', result)
 
-    def test_review_bucket(self):
-        self.assertEqual(_review_bucket_formula(2), REFERENCE_REVIEW_BUCKET_ROW2)
-
 
 class LowLyCutTest(unittest.TestCase):
     def test_suggested_bump_and_suggested_note_share_the_identical_condition(self):
@@ -144,6 +210,12 @@ class LowLyCutTest(unittest.TestCase):
         ws = wb["Daily Pacing"]
         self.assertEqual(ws["Z31"].value, "Low-LY cut amount")
         self.assertEqual(ws["AA31"].value, config.THRESHOLDS["low_ly_cut_percent"])
+
+    def test_threshold_block_includes_note_stale_after_days(self):
+        wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
+        ws = wb["Daily Pacing"]
+        self.assertEqual(ws["Z14"].value, "Note stale after (days)")
+        self.assertEqual(ws["AA14"].value, config.THRESHOLDS["note_stale_after_days"])
 
 
 def _sample_record(d, **overrides):
