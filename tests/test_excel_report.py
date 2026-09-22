@@ -65,12 +65,17 @@ REFERENCE_NEW_SINCE_LAST_REVIEW_ROW2 = (
 # 2026-09-18 to mirror the user's own 7-step daily routine (steps 1-6;
 # step 7 needs neighboring rows and isn't computed here) as one
 # filterable column. Locked down as a regression anchor same as the rest.
+# 2026-09-22: added the occ=100 short-circuit (matches Signal/Suggested
+# Bump) and fixed High LY to read the weekday/weekend-specific AA10/AA13
+# cells instead of the unrelated flat $AA$26 it was reading before.
 REFERENCE_REVIEW_BUCKET_ROW2 = (
-    '=IF(X2="NEW","1. New",IF(W2="Review - pace normalized","2. Override Normalized",'
+    '=IF(C2=100,"✓ Booked",IF(X2="NEW","1. New",'
+    'IF(W2="Review - pace normalized","2. Override Normalized",'
     'IF(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),$AA$24,$AA$23),'
-    '"3. Low LY",IF(F2>=$AA$26,"3. High LY",IF(M2>2,"4. Pace >10%",'
+    '"3. Low LY",IF(IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),'
+    'F2>=$AA$13,F2>=$AA$10),"3. High LY",IF(M2>2,"4. Pace >10%",'
     'IF(M2>1,"4. Pace 5-10%",IF(N2>1,"5. Pickup Spike",'
-    'IF(AND(T2>=0,T2<=U2),"6. Within Window",""))))))))'
+    'IF(AND(T2>=0,T2<=U2),"6. Within Window","")))))))))'
 )
 
 
@@ -251,6 +256,38 @@ class BuildWorkbookTest(unittest.TestCase):
             self.assertTrue(any(f"$AA${row}" in f for row in (8, 9, 10, 23)))
         for f in weekend_formulas:
             self.assertTrue(any(f"$AA${row}" in f for row in (11, 12, 13, 24)))
+        # 2026-09-22: a date sitting exactly on a tier's own cutoff (severe,
+        # below-avg, or high) must land in that tier, not slip through
+        # uncolored -- each tier-defining bound is <= / >=, never a bare
+        # < / >. (The shared internal edge between two adjacent tiers is
+        # correctly one-sided either way -- whichever tier claims it via
+        # <=/>= , the next tier's own bare >/< starts just past it.)
+        joined = " ".join(formulas)
+        for cell in ("$AA$8", "$AA$23", "$AA$9", "$AA$10", "$AA$11", "$AA$24", "$AA$12", "$AA$13"):
+            self.assertTrue(
+                f"<={cell}" in joined or f">={cell}" in joined,
+                f"{cell} should be a tier-defining bound (<=/>=) somewhere",
+            )
+        self.assertIn("F2<=$AA$8", joined)  # weekday severe
+        self.assertIn("F2<=$AA$9", joined)  # weekday below-avg
+        self.assertIn("F2>=$AA$10", joined)  # weekday high
+        self.assertIn("F2<=$AA$11", joined)  # weekend severe
+        self.assertIn("F2<=$AA$12", joined)  # weekend below-avg
+        self.assertIn("F2>=$AA$13", joined)  # weekend high
+
+    def test_review_bucket_high_ly_uses_the_weekday_weekend_specific_cells(self):
+        # 2026-09-22: this used to read $AA$26 (high_ly_raise_ease_threshold_pct,
+        # a flat 90 belonging to Suggested Bump's raise-ease logic) instead of
+        # the weekday/weekend-specific AA10/AA13 F itself uses -- silently
+        # under-counting High LY on weekdays (70% there, not 90%).
+        result = _review_bucket_formula(2)
+        self.assertIn("$AA$10", result)
+        self.assertIn("$AA$13", result)
+        self.assertNotIn("$AA$26", result)
+
+    def test_review_bucket_short_circuits_when_fully_booked(self):
+        result = _review_bucket_formula(2)
+        self.assertTrue(result.startswith('=IF(C2=100,"✓ Booked",'))
 
     def test_conditional_format_fills_use_bgcolor_not_fgcolor(self):
         # Regression test: Excel/Google Sheets read a conditional format's

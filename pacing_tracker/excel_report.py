@@ -54,6 +54,18 @@ stays traceable (matches the spec's own "(decided 9/11/26)" convention):
   account's own LY distribution (see the THRESHOLDS comment in config.py)
   found the two day types' occupancy sit in genuinely different ranges, so
   one number can't mean the same thing for both.
+- 2026-09-22: three fixes found by actually using the sheet. (1) F's four
+  bands now include the boundary value itself in the more severe side
+  (e.g. exactly at the below-avg cutoff colors as below-avg, not normal) --
+  a date sitting exactly on a cutoff wasn't getting colored at all. (2)
+  Review Bucket's "High LY" check was still reading $AA$26
+  (high_ly_raise_ease_threshold_pct, a flat 90 that belongs to Suggested
+  Bump's raise-ease logic) instead of the weekday/weekend-specific AA10/
+  AA13 added on 2026-09-20 -- silently under-counting High LY on weekdays
+  (70% there, not 90%). (3) Review Bucket now short-circuits to "✓ Booked"
+  for a fully-booked date (matching Signal/Suggested Bump), instead of
+  still routing it into a bucket when there's no pricing decision left to
+  make.
 """
 
 import argparse
@@ -117,12 +129,12 @@ THRESHOLD_ROWS = [
     (5, "Pickup 14d >", "pickup_14d_threshold"),
     (6, "Pickup 30d >", "pickup_30d_threshold"),
     (7, "Pickup 60d >", "pickup_60d_threshold"),
-    (8, "Weekday LY severe <", "ly_weekday_severe_below"),
-    (9, "Weekday LY below-avg <", "ly_weekday_below_avg_below"),
-    (10, "Weekday LY high >", "ly_weekday_high_above"),
-    (11, "Weekend LY severe <", "ly_weekend_severe_below"),
-    (12, "Weekend LY below-avg <", "ly_weekend_below_avg_below"),
-    (13, "Weekend LY high >", "ly_weekend_high_above"),
+    (8, "Weekday LY severe <=", "ly_weekday_severe_below"),
+    (9, "Weekday LY below-avg <=", "ly_weekday_below_avg_below"),
+    (10, "Weekday LY high >=", "ly_weekday_high_above"),
+    (11, "Weekend LY severe <=", "ly_weekend_severe_below"),
+    (12, "Weekend LY below-avg <=", "ly_weekend_below_avg_below"),
+    (13, "Weekend LY high >=", "ly_weekend_high_above"),
     (23, "Weekday LY cut / low tier <", "weekday_ly_cut_pct"),
     (24, "Weekend LY cut / low tier <", "weekend_ly_cut_pct"),
     (25, "Low-LY override: Pace >=", "low_ly_override_pace"),
@@ -253,15 +265,22 @@ def _review_bucket_formula(r):
     one at a time. Step 7 (multiple nearby low-occupancy dates) needs a
     look across neighboring rows and isn't computed here.
     """
+    occ = f"{COL['occupancy']}{r}"
     x, w = f"{COL['new_since_last_review']}{r}", f"{COL['override_status']}{r}"
     f, weekday = f"{COL['mkt_occ_ly']}{r}", f"{COL['weekday']}{r}"
     m, n = f"{COL['pace_ratio']}{r}", f"{COL['pickup_ratio']}{r}"
     t, u = f"{COL['days_out']}{r}", f"{COL['median_booking_window']}{r}"
     weekend = _weekend_fragment(weekday)
     low_ly = f"{f}<IF({weekend},$AA$24,$AA$23)"
-    high_ly = f"{f}>=$AA$26"
+    # Mirrors F's own weekday/weekend-specific "high" tier (AA10/AA13) --
+    # this used to reuse $AA$26 (high_ly_raise_ease_threshold_pct, a flat
+    # 90 meant for Suggested Bump's raise-ease bar, not this column), which
+    # silently under-counted weekday High LY dates against the 70%
+    # weekday actually uses everywhere else.
+    high_ly = f"IF({weekend},{f}>=$AA$13,{f}>=$AA$10)"
     return (
-        f'=IF({x}="NEW","1. New",'
+        f'=IF({occ}=100,"✓ Booked",'
+        f'IF({x}="NEW","1. New",'
         f'IF({w}="Review - pace normalized","2. Override Normalized",'
         f'IF({low_ly},"3. Low LY",'
         f'IF({high_ly},"3. High LY",'
@@ -269,7 +288,7 @@ def _review_bucket_formula(r):
         f'IF({m}>1,"4. Pace 5-10%",'
         f'IF({n}>1,"5. Pickup Spike",'
         f'IF(AND({t}>=0,{t}<={u}),"6. Within Window",'
-        '""))))))))'
+        '"")))))))))'
     )
 
 
@@ -404,32 +423,36 @@ def _apply_conditional_formatting(ws, last_row):
     # here. Each day type's four bands are bounded on both sides so exactly
     # one rule ever matches a given cell (same approach as the G/Pace vs
     # STLY bands below), rather than relying on rule priority/stacking.
+    # Boundaries are inclusive on the "worse" side (e.g. a value exactly at
+    # the below-avg cutoff gets the below-avg color, not the milder normal
+    # band) -- found live on 2026-09-22 when a date at exactly the cutoff
+    # value wasn't getting colored at all.
     f_range = f"F2:F{last_row}"
     not_weekend = f"NOT({_weekend_fragment('B2')})"
     is_weekend = _weekend_fragment("B2")
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({not_weekend},F2<$AA$8)"], fill=fmt("dark_red"))
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2<=$AA$8)"], fill=fmt("dark_red"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>=$AA$8,F2<$AA$23)"], fill=fmt("orange"))
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>$AA$8,F2<=$AA$23)"], fill=fmt("orange"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>=$AA$23,F2<$AA$9)"], fill=fmt("light_gold"))
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>$AA$23,F2<=$AA$9)"], fill=fmt("light_gold"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>$AA$10)"], fill=fmt("med_green"))
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>=$AA$10)"], fill=fmt("med_green"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({is_weekend},F2<$AA$11)"], fill=fmt("dark_red"))
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2<=$AA$11)"], fill=fmt("dark_red"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>=$AA$11,F2<$AA$24)"], fill=fmt("orange"))
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>$AA$11,F2<=$AA$24)"], fill=fmt("orange"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>=$AA$24,F2<$AA$12)"], fill=fmt("light_gold"))
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>$AA$24,F2<=$AA$12)"], fill=fmt("light_gold"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>$AA$13)"], fill=fmt("med_green"))
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>=$AA$13)"], fill=fmt("med_green"))
     )
 
     op_range = f"O2:P{last_row}"
