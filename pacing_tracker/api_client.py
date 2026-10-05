@@ -74,6 +74,19 @@ class PriceLabsClient:
     def poll_report_builder_data(self, request_id):
         return self._post("report_builder/poll", json_body={"request_id": request_id})
 
+    def get_listing_neighborhood_market(self, listing_id, pms):
+        """Per-listing comp-set occupancy/LY/STLY and new/canceled bookings.
+
+        Path confirmed live on 2026-10-05 (run from the user's own machine,
+        not this sandbox -- see scripts/check_neighborhood_endpoint.py): the
+        real path is just "neighborhood_data", with listing_id/pms as query
+        params. The MCP tool wrapping this same data describes its own path
+        as "/mcp/api/neighborhood_data" -- that's that tool's internal
+        routing, not the literal Customer API path, same situation as
+        get_listing_date_overrides's path below.
+        """
+        return self._get("neighborhood_data", params={"listing_id": listing_id, "pms": pms})
+
     def get_listing_date_overrides(self, listing_id, pms, start_date=None, end_date=None):
         params = {"pms": pms}
         if start_date:
