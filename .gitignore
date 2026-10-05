@@ -4,4 +4,5 @@ __pycache__/
 .venv/
 venv/
 data/pull_*.json
+data/occupancy_snapshots/
 logs/

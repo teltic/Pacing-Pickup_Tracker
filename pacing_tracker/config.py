@@ -22,11 +22,18 @@ LISTINGS = [
         "listing_id": "dec5d2ed-4400-4350-8df3-af76b5d3d09c",
         "pms": "smartbnb",
         "name": "Mesquite Vacation Rental",
+        # Its own Neighborhood data has exactly one comp-set category --
+        "neighborhood_category": None,
     },
     {
         "listing_id": "0e251a6a-3ea4-4d32-878a-cd734591c925",
         "pms": "smartbnb",
         "name": "Game Room (5BR label, actually 4BR)",
+        # Its Neighborhood data buckets by bedroom count ("3","4","5","9");
+        # "4" (23 listings) is the real comp set -- "5" has just 1 listing
+        # and would be meaningless. A config setting, not hardcoded in the
+        # parser, since PriceLabs could change bucket membership over time.
+        "neighborhood_category": "4",
     },
 ]
 
@@ -44,15 +51,43 @@ FORECAST_DAYS = 366
 
 # --- Report Builder source --------------------------------------------------
 # Confirmed reachable via a plain Customer API key (2026-09-12, see
-# scripts/check_report_builder_access.py). This template already returns
-# Occupancy/Market Occupancy/LY/STLY/Pickup 3-7-14-30-60d pre-computed and
-# blended across both listings -- looked up by name (not a hardcoded
-# template_id) since that's stable even if the account's template list
-# changes.
+# scripts/check_report_builder_access.py). This template is scoped (in the
+# PriceLabs dashboard, Portfolio Analytics > Report Builder > Listings
+# filter) to just the two listings above -- looked up by name (not a
+# hardcoded template_id) since that's stable even if the account's
+# template list changes.
+#
+# 2026-10-05: this template now supplies ONLY Occupancy %, Weekday, and
+# Events. It used to also supply Mkt Occ %/STLY/LY and pickup, but those
+# are portfolio-level (blended across whatever listings the template's own
+# scope includes) -- when a 3rd listing (Park City) was added to the
+# account, it silently widened that blend without anyone changing this
+# tool's config. Those columns now come from each listing's own
+# Neighborhood data instead (see neighborhood_pull.py), which is scoped
+# per-listing by PriceLabs itself, not by this template's own filter.
+# data_pull._check_listing_count() still guards Occupancy %/Events against
+# the same kind of scope drift happening again.
 
 REPORT_BUILDER_TEMPLATE_NAME = "Master Sheet - TB"
 
 PICKUP_WINDOWS_DAYS = [3, 7, 14, 30, 60]
+
+# --- Neighborhood data source (Mkt Occ %/STLY/LY, pickup) -------------------
+# Each listing's own comp-set data (see config.LISTINGS' neighborhood_category
+# for how Game Room's bedroom-count bucket is picked). Blended across the two
+# listings into the single Mkt Occ % column series the sheet has always had.
+#
+# "simple_average" is the only method implemented so far -- a config toggle
+# now so a later switch (e.g. weighting by each listing's own Listings Used,
+# or splitting into one sheet per comp set instead of blending at all) is a
+# config change, not a rewrite.
+MARKET_BLEND_METHOD = "simple_average"
+
+# Where daily Occupancy-by-date snapshots are saved so pickup (which
+# Neighborhood data doesn't provide directly -- see neighborhood_pull.py's
+# module docstring) can be computed as today's occupancy for a date minus
+# that same date's occupancy from N days ago, once enough history exists.
+PICKUP_SNAPSHOT_FOLDER = os.environ.get("PACING_SNAPSHOT_FOLDER", os.path.join("data", "occupancy_snapshots"))
 
 # --- Thresholds (spec section "Threshold values") ---------------------------
 

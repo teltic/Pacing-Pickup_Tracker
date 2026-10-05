@@ -74,6 +74,20 @@ class PriceLabsClient:
     def poll_report_builder_data(self, request_id):
         return self._post("report_builder/poll", json_body={"request_id": request_id})
 
+    def get_all_listings(self):
+        """All listings on the account. Path is an educated guess, NOT yet
+        confirmed live the way the other endpoints on this class are
+        (listings/{id}/... sub-resources are confirmed, so a plain
+        "listings" collection endpoint is the standard REST shape to
+        expect, but PriceLabs' own MCP tool docs have been wrong about a
+        literal path twice before on this project -- see
+        get_listing_date_overrides and get_listing_neighborhood_market).
+        data_pull._warn_on_unexpected_listings() treats a failure here as
+        "couldn't check" and logs a warning, not a hard failure, since
+        this guard is a nice-to-have flag, not core data.
+        """
+        return self._get("listings")
+
     def get_listing_neighborhood_market(self, listing_id, pms):
         """Per-listing comp-set occupancy/LY/STLY and new/canceled bookings.
 

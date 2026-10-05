@@ -306,6 +306,35 @@ class BuildWorkbookTest(unittest.TestCase):
         self.assertEqual(ws["B2"].value, "Jan")
         self.assertEqual(ws["C2"].value, config.MEDIAN_BOOKING_WINDOW_BY_MONTH[1])
 
+    def test_how_to_use_sheet_shows_data_source_per_listing(self):
+        meta = {
+            "Mesquite Vacation Rental": {
+                "comp_set_name": "Market Dashboard: ABB Comp: Sleep 10 or more with pool",
+                "listings_used": 7,
+                "category_key": "Sleep 10 or more with pool",
+            },
+            "Game Room (5BR label, actually 4BR)": {
+                "comp_set_name": "Nearby Listings: 4BR",
+                "listings_used": 23,
+                "category_key": "4",
+            },
+            "pull_timestamp": "2026-10-05T12:00:00",
+        }
+        wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {}, meta=meta)
+        ws = wb["How To Use"]
+        self.assertEqual(ws["A3"].value, "Mesquite Vacation Rental")
+        self.assertEqual(ws["B3"].value, "Market Dashboard: ABB Comp: Sleep 10 or more with pool")
+        self.assertEqual(ws["C3"].value, "Sleep 10 or more with pool")
+        self.assertEqual(ws["D3"].value, 7)
+        self.assertEqual(ws["E3"].value, "2026-10-05T12:00:00")
+        self.assertEqual(ws["A4"].value, "Game Room (5BR label, actually 4BR)")
+        self.assertEqual(ws["D4"].value, 23)
+
+    def test_how_to_use_sheet_handles_missing_meta_without_erroring(self):
+        wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})  # meta=None
+        ws = wb["How To Use"]
+        self.assertEqual(ws["B3"].value, "Unknown")
+
     def test_mkt_occ_ly_bands_are_weekday_weekend_aware(self):
         # 2026-09-20: a flat threshold doesn't work for F -- weekday and
         # weekend LY occupancy sit in genuinely different ranges on the

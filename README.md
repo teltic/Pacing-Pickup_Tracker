@@ -7,10 +7,16 @@ implements.
 
 ## Status
 
-- [x] Data pull (`pacing_tracker/data_pull.py`) — pulls Occupancy, Market
-      Occupancy, LY/STLY, and Pickup 3/7/14/30/60d for the next 366 days
-      (today through +365), pre-blended across both listings by PriceLabs
-      itself. Verified end-to-end against the live account.
+- [x] Data pull (`pacing_tracker/data_pull.py`) — pulls Occupancy %/
+      Weekday/Events from Report Builder (scoped to exactly these 2
+      listings, guarded against scope drift) and Mkt Occ %/STLY/LY/
+      Pickup 3/7/14/30/60d from each listing's own Neighborhood data,
+      blended (`neighborhood_pull.py`, `pickup_snapshots.py`), for the
+      next 366 days (today through +365). Verified end-to-end against the
+      live account, including the 2026-10-05 rebuild off Neighborhood
+      data after a 3rd listing (Park City) silently contaminated the
+      portfolio-level figures Report Builder used to supply for these
+      columns — see "How pacing/pickup is sourced" below.
 - [x] Excel report generation (`pacing_tracker/excel_report.py`) — builds
       the Daily Pacing workbook with live formulas (Pace vs STLY, Signal,
       Suggested Bump, Override Status, New Since Last Review), matching a
@@ -59,33 +65,89 @@ python3 -m pacing_tracker.data_pull --out data/pull_today.json
 
 ## How pacing/pickup is sourced
 
-This pulls directly from PriceLabs' **Report Builder** — specifically the
-"Master Sheet - TB" template, the same one the chat-based prototype used —
-via `report_builder/templates`, `report_builder/data`, and
-`report_builder/poll`. This was originally assumed to be internal/session-only
-(not reachable from a plain Customer API key), so an earlier version of this
-script instead combined `neighborhood_data` + `reservation_data` and
-self-computed pickup from a local snapshot history. Live testing
-(2026-09-12) showed Report Builder **is** reachable from a plain API key,
-so that whole workaround was removed — this is simpler and gives correct
-pickup values immediately instead of needing 30-60 days of accumulated
-history.
+**2026-10-05: this is now a hybrid of two sources**, after a 3rd listing
+(Park City, added to the account for a different market) got silently
+blended into every portfolio-level figure this tool pulled:
 
-Each report row already comes blended across both listings
-(`Listing Count: 2`) and pre-computed:
+- **Occupancy %, Weekday, Events** still come from PriceLabs' **Report
+  Builder** ("Master Sheet - TB" template) via `report_builder/templates`,
+  `report_builder/data`, and `report_builder/poll`. The template is scoped
+  in the PriceLabs dashboard (Portfolio Analytics → Report Builder →
+  Listings filter) to just the 2 configured listings. Every row carries a
+  `Listing Count` — `data_pull._check_listing_count()` hard-fails the pull
+  (no file written) if that's ever anything other than
+  `len(config.LISTINGS)`, so a scope drift like Park City's can't happen
+  silently again.
+- **Mkt Occ %, Mkt Occ % STLY, Mkt Occ % LY, and Pickup 3/7/14/30/60d**
+  come from each listing's own **Neighborhood data**
+  (`neighborhood_pull.py`, endpoint `GET /v1/neighborhood_data`) instead of
+  Report Builder, and are blended together (`config.MARKET_BLEND_METHOD`,
+  currently `"simple_average"`). This isn't just a contamination fix —
+  each listing's own PriceLabs comp set is a more precise match than one
+  portfolio-wide figure (confirmed live: Mesquite's comp set is "Sleep 10
+  or more with pool", 7 listings; Game Room's is the 4BR bucket of
+  "Nearby Listings", 23 listings — genuinely different comp sets).
 
-```
-Date, Weekday, Occupancy,
-Average Market Occupancy, Average Market Occupancy LY, Average Market Occupancy STLY,
-Average Market Occupancy Pickup 3/7/14/30/60
-```
+(Aside, for anyone reading the git history: an *earlier* version of this
+script also used `neighborhood_data` for everything, before being
+replaced by Report Builder on 2026-09-12 once Report Builder turned out
+to be reachable from a plain API key too. This isn't that old approach
+coming back wholesale — only the market columns moved, and the reasoning
+this time is precision/contamination, not reachability.)
 
-`data_pull.py` looks up the template by name (`config.REPORT_BUILDER_TEMPLATE_NAME`,
-not a hardcoded template_id, since that's stable even if the account's
-template list changes), fetches it (polling if PriceLabs computes it
-asynchronously), and filters/sorts rows down to the requested date window.
-Weekday is passed through exactly as PriceLabs returns it (e.g. `"05.Fri"`)
-to match the reference workbook, rather than recomputed from `Date`.
+### Response shapes (confirmed live, not assumed)
+
+The two listings' Neighborhood responses have different shapes:
+Mesquite has exactly one comp-set category, with flat `Y_values` arrays;
+Game Room's comp set is split into bedroom-count categories (`"3"`, `"4"`,
+`"5"`, `"9"` on this account), with **double-nested** `Y_values` (needs an
+extra `[0]`) and 10 labels instead of 6. `neighborhood_pull.py` normalizes
+both to the same shape and indexes everything by the response's own date
+strings, never by position. Which bedroom bucket counts as Game Room's
+real comp set (`"4"`, 23 listings — not `"5"`, which has just 1) is a
+config setting (`config.LISTINGS[1]["neighborhood_category"]`), not
+hardcoded, since PriceLabs could rename or resplit its buckets later.
+
+### Pickup: snapshot diffing, not a direct field
+
+Neighborhood data gives a same-day snapshot (today's Occupancy/New
+Bookings/Canceled Bookings for each future date), not a trailing pickup
+trend — there's no field to read for "how much did this change over the
+last 7 days." `pickup_snapshots.py` saves each day's blended
+Mkt-Occ-%-by-date to `config.PICKUP_SNAPSHOT_FOLDER`, and computes
+Pickup Nd as today's value minus the snapshot from exactly N days ago.
+**Blank, not estimated, until that snapshot exists** — a fresh pull
+history starts empty and fills in day by day, the same way
+`carryforward.py`'s Override Request/Notes history does.
+
+### Trust guards
+
+- Either listing's Neighborhood data coming back empty is a hard failure
+  (`neighborhood_pull.fetch_and_parse_listing_market`), never a silent
+  skip or a zero.
+- The **How To Use** tab's Data Source block shows, per listing, which
+  comp set was actually used (`Neighborhood Data Source`), how many
+  listings it covers, and the pull timestamp — so a number that looks
+  wrong can be checked against its real source.
+- `data_pull._warn_on_unexpected_listings()` logs (doesn't fail) a warning
+  if the account has listings beyond the 2 configured here — this is the
+  guard that would have caught Park City immediately. Its endpoint
+  (`PriceLabsClient.get_all_listings`, `GET /v1/listings`) isn't confirmed
+  live the way the rest of this file's endpoints are, so a failure there
+  logs "couldn't check" rather than blocking the pull.
+- A quick sanity-check log line prints 11/13 and 11/14's LY occupancy on
+  every pull (`data_pull.SANITY_CHECK_DATES`) — these were directly
+  compared against PriceLabs' own dashboard during this rebuild
+  (Mesquite ~71.4%/57.1%, Game Room ~70.6%/64.7%). Not load-bearing,
+  just a fast eyeball check; safe to clear once you trust the rebuild.
+
+`data_pull.py` looks up the Report Builder template by name
+(`config.REPORT_BUILDER_TEMPLATE_NAME`, not a hardcoded template_id,
+since that's stable even if the account's template list changes), fetches
+it (polling if PriceLabs computes it asynchronously), and filters/sorts
+rows down to the requested date window. Weekday is passed through exactly
+as PriceLabs returns it (e.g. `"05.Fri"`) to match the reference
+workbook, rather than recomputed from `Date`.
 
 ## Excel report generation
 
@@ -241,6 +303,26 @@ just unit-tested.
   pacing signals 360+ days out anyway — but worth knowing if the Excel
   report shows blank rows right at the far edge of the sheet.
 
+## Verified against the live account (2026-10-05)
+
+- **The real Neighborhood data endpoint**: `GET /v1/neighborhood_data`
+  (params `listing_id`, `pms`) — confirmed by running
+  `scripts/check_neighborhood_endpoint.py` from the user's own machine
+  (this sandbox's network policy blocks `api.pricelabs.co` outright, so
+  this had to be verified locally, not from here). The MCP tool wrapping
+  this same data describes its own path as `/mcp/api/neighborhood_data`,
+  which turned out to be that tool's internal routing, not the literal
+  Customer API path — the same situation as `listings/{id}/overrides`
+  back on 2026-09-12.
+- **Game Room's 4BR-bucket Occupancy_LY for 11/13 and 11/14**: pulled
+  live and parsed programmatically (not hand-transcribed) — `70.5882%`
+  and `64.7059%`, matching the dashboard-reported ~70.6%/64.7% almost
+  exactly.
+- **The Listing Count guard works end-to-end**: after narrowing the
+  Report Builder template's Listings filter in the PriceLabs dashboard, a
+  fresh live pull showed `Listing Count: 2` on all 730 rows returned —
+  confirmed via the live account, not just unit tests.
+
 ## Configuration
 
 Listings, thresholds, and the median-booking-window reference table all
@@ -248,9 +330,16 @@ live in `pacing_tracker/config.py` as plain data — no thresholds are
 hardcoded into the pacing/signal/bump logic; they're all cell references
 (`$AA$2` etc.) into the threshold block `excel_report.py` writes onto the
 Daily Pacing sheet itself, editable there without touching any formula.
-`LISTINGS` isn't used by the data-pull or Excel stages (Report Builder
-already blends both listings), but will be needed by the push phase,
-which pushes overrides per listing.
+
+`LISTINGS` is used directly by `data_pull.py` now (2026-10-05): each
+entry's `listing_id`/`pms` drives its own Neighborhood data pull, and
+`neighborhood_category` picks which comp-set category/bucket counts as
+that listing's real comp set (`None` when there's only one category,
+like Mesquite; a specific key like `"4"` when the listing's comp set is
+split into buckets, like Game Room's bedroom-count buckets). Adding a
+listing here means adding it to the Report Builder template's Listings
+filter too, or `_check_listing_count()` will correctly refuse to trust
+the pull.
 
 ### Rule changes since the reference file
 

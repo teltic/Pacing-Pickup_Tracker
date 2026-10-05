@@ -91,6 +91,7 @@ from .carryforward import load_previous_state_for_folder
 SHEET_NAME = "Daily Pacing"
 BOOKING_WINDOW_SHEET_NAME = "Booking Window"
 DAILY_REVIEW_STEPS_SHEET_NAME = "Daily Review Steps"
+HOW_TO_USE_SHEET_NAME = "How To Use"
 
 HEADERS = [
     "Date", "Weekday", "Occupancy %", "Mkt Occ %", "Mkt Occ % STLY", "Mkt Occ % LY",
@@ -409,6 +410,38 @@ def _write_daily_review_steps_sheet(wb):
     return ws
 
 
+def _write_how_to_use_sheet(wb, meta):
+    """Data Source block (2026-10-05 Neighborhood-data rebuild, trust guard
+    #2): per listing, which comp set Mkt Occ %/STLY/LY actually came from,
+    how many listings that comp set covers, and when this was pulled --
+    so a wrong-looking number can be checked against its real source
+    instead of just trusted or distrusted on faith.
+    """
+    ws = wb.create_sheet(HOW_TO_USE_SHEET_NAME)
+    ws["A1"] = "Data Source (where Mkt Occ %/STLY/LY came from on this pull)"
+    ws["A1"].font = Font(name="Arial", size=11, bold=True)
+
+    headers = ["Listing", "Comp Set", "Category/Bucket", "Listings Used", "Pull Timestamp"]
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=2, column=col_idx, value=header)
+        cell.font = Font(name="Arial", size=10, bold=True)
+
+    pull_timestamp = (meta or {}).get("pull_timestamp", "")
+    row = 3
+    for listing in config.LISTINGS:
+        listing_meta = (meta or {}).get(listing["name"], {})
+        ws.cell(row=row, column=1, value=listing["name"])
+        ws.cell(row=row, column=2, value=listing_meta.get("comp_set_name", "Unknown"))
+        ws.cell(row=row, column=3, value=listing_meta.get("category_key", "Unknown"))
+        ws.cell(row=row, column=4, value=listing_meta.get("listings_used"))
+        ws.cell(row=row, column=5, value=pull_timestamp)
+        row += 1
+
+    for col, width in zip("ABCDE", (34, 48, 24, 14, 20)):
+        ws.column_dimensions[col].width = width
+    return ws
+
+
 def _apply_conditional_formatting(ws, last_row):
     full_range = f"A2:{LAST_DATA_COL}{last_row}"
 
@@ -529,7 +562,7 @@ def _set_column_widths(ws):
     ws.column_dimensions.group("J", "N", hidden=True)
 
 
-def build_workbook(records, pull_date, previous_state):
+def build_workbook(records, pull_date, previous_state, meta=None):
     wb = Workbook()
     ws = wb.active
     ws.title = SHEET_NAME
@@ -548,6 +581,7 @@ def build_workbook(records, pull_date, previous_state):
 
     _write_booking_window_sheet(wb)
     _write_daily_review_steps_sheet(wb)
+    _write_how_to_use_sheet(wb, meta)
     return wb
 
 
@@ -559,14 +593,16 @@ def main():
     args = parser.parse_args()
 
     with open(args.in_path) as f:
-        records = json.load(f)
+        payload = json.load(f)
+    records = payload["records"]
+    meta = payload.get("meta", {})
 
     pull_date = datetime.strptime(args.pull_date, "%Y-%m-%d").date() if args.pull_date else date.today()
     out_folder = args.out_folder or config.DRIVE_SYNC_FOLDER
     os.makedirs(out_folder, exist_ok=True)
 
     previous_state = load_previous_state_for_folder(out_folder, pull_date)
-    wb = build_workbook(records, pull_date, previous_state)
+    wb = build_workbook(records, pull_date, previous_state, meta=meta)
 
     out_path = os.path.join(out_folder, config.output_filename(pull_date))
     wb.save(out_path)
