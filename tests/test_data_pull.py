@@ -1,7 +1,7 @@
 import unittest
 
 from pacing_tracker.api_client import PriceLabsAPIError
-from pacing_tracker.data_pull import _find_template_id, _parse_row, fetch_report_rows, run_pull
+from pacing_tracker.data_pull import _check_listing_count, _find_template_id, _parse_row, fetch_report_rows, run_pull
 
 
 def _row(date_str, weekday_label, **overrides):
@@ -94,7 +94,29 @@ class ParseRowTest(unittest.TestCase):
         self.assertEqual(record["pickup_60d"], 4.0)
 
 
+class CheckListingCountTest(unittest.TestCase):
+    def test_passes_silently_when_every_row_matches(self):
+        rows = [_row("2026-09-12", "07.Sat"), _row("2026-09-13", "01.Sun")]
+        _check_listing_count(rows, expected_count=2)  # no exception
+
+    def test_raises_when_a_row_has_an_unexpected_listing_count(self):
+        # 2026-10-05: this is exactly how the Park City contamination was
+        # first caught -- Listing Count silently went from 2 to 3.
+        rows = [_row("2026-09-12", "07.Sat"), _row("2026-09-13", "01.Sun", **{"Listing Count": 3})]
+        with self.assertRaises(PriceLabsAPIError) as ctx:
+            _check_listing_count(rows, expected_count=2)
+        self.assertIn("2026-09-13", str(ctx.exception))
+        self.assertIn("Listing Count=3", str(ctx.exception))
+
+
 class RunPullTest(unittest.TestCase):
+    def test_raises_before_writing_anything_if_listing_count_drifts(self):
+        templates = [{"templateId": 3078, "name": "Master Sheet - TB"}]
+        rows = [_row("2026-09-12", "07.Sat", **{"Listing Count": 3})]
+        client = FakeClient(templates, rows)
+        with self.assertRaises(PriceLabsAPIError):
+            run_pull(client, pull_date="2026-09-12", forecast_days=1, template_name="Master Sheet - TB")
+
     def test_filters_to_window_and_sorts_by_date(self):
         templates = [{"templateId": 3078, "name": "Master Sheet - TB"}]
         rows = [

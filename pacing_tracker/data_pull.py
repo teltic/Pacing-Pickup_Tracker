@@ -8,6 +8,17 @@ scripts/check_report_builder_access.py). It returns, pre-computed and
 already blended across both listings: Occupancy, Market Occupancy, LY,
 STLY, and Pickup 3/7/14/30/60d -- so unlike an earlier version of this
 script, nothing here is self-computed or estimated.
+
+Every row carries a "Listing Count" -- how many listings the template's
+own scope blended together to produce that row. 2026-10-05: a 3rd
+listing (Park City) got added to the account and the template, silently
+widening every blended figure here (Listing Count quietly went 2 -> 3,
+which is how this was first caught). _check_listing_count() now hard-
+fails run_pull() -- no file written -- if that count is ever anything
+other than len(config.LISTINGS), so a scope drift like that can't happen
+silently again. Fixing the template's own Listings filter in PriceLabs
+(Portfolio Analytics > Report Builder) is still the real fix; this is
+the guard that catches it if that filter ever gets reset or widened.
 """
 
 import argparse
@@ -78,6 +89,27 @@ def fetch_report_rows(client, template_name=None, poll_interval_seconds=3, max_p
     raise PriceLabsAPIError(f"Timed out after {max_poll_seconds}s waiting for Report Builder (request_id={request_id}).")
 
 
+def _check_listing_count(raw_rows, expected_count):
+    """Report Builder blends every listing in the template's own scope into
+    each row -- a "Listing Count" other than what this tool is configured
+    for means the template picked up a listing it shouldn't have (this is
+    exactly how the Park City contamination was first caught: Listing Count
+    silently went from 2 to 3). Hard-fails rather than warning, since a
+    workbook that looks normal but is quietly blending in another listing
+    is worse than no workbook at all.
+    """
+    bad = [(row.get("Date"), row.get("Listing Count")) for row in raw_rows if row.get("Listing Count") != expected_count]
+    if bad:
+        bad_date, bad_count = bad[0]
+        raise PriceLabsAPIError(
+            f"Report Builder returned Listing Count={bad_count} (expected {expected_count}) "
+            f"on {len(bad)} date(s), e.g. {bad_date}. The '{config.REPORT_BUILDER_TEMPLATE_NAME}' "
+            f"template is no longer scoped to just your {expected_count} configured listings -- "
+            "check its Listings filter in PriceLabs (Portfolio Analytics > Report Builder > "
+            "open the template > Listings filter) before trusting this pull. No file was written."
+        )
+
+
 def _parse_row(row):
     # Pass PriceLabs' own Weekday string through as-is (e.g. "05.Fri") rather
     # than deriving our own -- matches the reference workbook, and the Excel
@@ -96,6 +128,7 @@ def run_pull(client, pull_date=None, forecast_days=None, template_name=None):
     end = start + timedelta(days=forecast_days - 1)
 
     raw_rows = fetch_report_rows(client, template_name=template_name)
+    _check_listing_count(raw_rows, expected_count=len(config.LISTINGS))
 
     records = []
     for row in raw_rows:
