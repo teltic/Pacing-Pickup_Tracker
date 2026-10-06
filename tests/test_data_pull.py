@@ -26,27 +26,32 @@ def _row(date_str, weekday_label, **overrides):
     return row
 
 
-def _neighborhood_response(dates, category_key, listings_used=5, occ=50.0, occ_ly=40.0, occ_stly=45.0):
+def _neighborhood_response(dates, category_keys, listings_used=5, occ=50.0, occ_ly=40.0, occ_stly=45.0):
+    """category_keys: a single key (str) or a list of keys to combine (all
+    given the same values here -- which bucket "wins" the weighted combine
+    doesn't matter when they're identical, so tests can assert on a single
+    known blended number regardless of how many buckets config combines).
+    """
     labels = ["Occupancy", "New Bookings", "Canceled Bookings", "Occupancy_LY", "Occupancy_STLY", "New_Bookings_STLY"]
+    keys = category_keys if isinstance(category_keys, list) else [category_keys]
+    bucket = {
+        "Listings Used": listings_used,
+        "X_values": list(dates),
+        "Y_values": [
+            [occ] * len(dates),
+            [0] * len(dates),
+            [0] * len(dates),
+            [occ_ly] * len(dates),
+            [occ_stly] * len(dates),
+            [0] * len(dates),
+        ],
+    }
     return {
         "data": {
-            "Neighborhood Data Source": f"Test comp set ({category_key})",
+            "Neighborhood Data Source": f"Test comp set ({category_keys})",
             "Future Occ/New/Canc": {
                 "Labels": labels,
-                "Category": {
-                    category_key: {
-                        "Listings Used": listings_used,
-                        "X_values": list(dates),
-                        "Y_values": [
-                            [occ] * len(dates),
-                            [0] * len(dates),
-                            [0] * len(dates),
-                            [occ_ly] * len(dates),
-                            [occ_stly] * len(dates),
-                            [0] * len(dates),
-                        ],
-                    }
-                },
+                "Category": {key: bucket for key in keys},
             },
         }
     }
@@ -85,8 +90,11 @@ class FakeClient:
 
     def get_listing_neighborhood_market(self, listing_id, pms):
         if listing_id == GAME_ROOM_ID:
-            return _neighborhood_response(self.neighborhood_dates, category_key="4", occ=60.0, occ_ly=55.0, occ_stly=58.0)
-        return _neighborhood_response(self.neighborhood_dates, category_key="only-comp-set", occ=50.0, occ_ly=40.0, occ_stly=45.0)
+            # Matches the real config (3,4,5 combined) -- all 3 buckets
+            # given the same values so the weighted-combine result is the
+            # same known number regardless of weighting.
+            return _neighborhood_response(self.neighborhood_dates, ["3", "4", "5"], occ=60.0, occ_ly=55.0, occ_stly=58.0)
+        return _neighborhood_response(self.neighborhood_dates, "only-comp-set", occ=50.0, occ_ly=40.0, occ_stly=45.0)
 
     def get_all_listings(self):
         # Default: exactly the configured listings, no extras -- tests
@@ -235,7 +243,7 @@ class RunPullTest(unittest.TestCase):
         self.assertAlmostEqual(record["market_occ_pct_stly"], 51.5)
         self.assertIn("Mesquite Vacation Rental", meta)
         self.assertIn("Game Room (5BR label, actually 4BR)", meta)
-        self.assertEqual(meta["Game Room (5BR label, actually 4BR)"]["category_key"], "4")
+        self.assertEqual(meta["Game Room (5BR label, actually 4BR)"]["category_key"], "3,4,5")
         self.assertIn("pull_timestamp", meta)
 
     def test_pickup_is_blank_with_no_prior_snapshot_and_filled_once_one_exists(self):

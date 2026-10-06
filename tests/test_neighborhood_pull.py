@@ -2,6 +2,7 @@ import unittest
 
 from pacing_tracker.api_client import PriceLabsAPIError
 from pacing_tracker.neighborhood_pull import (
+    _combine_weighted,
     _select_category,
     _unwrap_y_values,
     blend_market_data,
@@ -104,6 +105,36 @@ class SelectCategoryTest(unittest.TestCase):
         self.assertIn("'5'", str(ctx.exception))
 
 
+class CombineWeightedTest(unittest.TestCase):
+    def test_weights_by_each_buckets_own_listings_used(self):
+        # 2026-10-06: this is exactly Game Room's real case -- a 94-listing
+        # bucket must count far more than a 1-listing one.
+        resp = _game_room_response()
+        categories = resp["data"]["Future Occ/New/Canc"]["Category"]
+        labels = resp["data"]["Future Occ/New/Canc"]["Labels"]
+        label_index = {name: i for i, name in enumerate(labels)}
+        x_values, series, total_weight = _combine_weighted(categories, ["3", "4", "5"], label_index, "Game Room")
+        self.assertEqual(x_values, ["2026-11-13", "2026-11-14"])
+        self.assertEqual(total_weight, 96 + 23 + 1)
+        occ = series[label_index["Occupancy"]]
+        self.assertAlmostEqual(occ[0], 54.36274, places=4)
+        self.assertAlmostEqual(occ[1], 53.23530, places=4)
+
+    def test_raises_when_a_configured_bucket_is_missing(self):
+        resp = _game_room_response()
+        categories = resp["data"]["Future Occ/New/Canc"]["Category"]
+        labels = resp["data"]["Future Occ/New/Canc"]["Labels"]
+        label_index = {name: i for i, name in enumerate(labels)}
+        with self.assertRaises(PriceLabsAPIError) as ctx:
+            _combine_weighted(categories, ["3", "4", "9"], label_index, "Game Room")
+        self.assertIn("'9'", str(ctx.exception))
+
+    def test_raises_when_combined_buckets_have_zero_listings_used(self):
+        categories = {"3": {"Listings Used": 0, "X_values": [], "Y_values": [[]]}}
+        with self.assertRaises(PriceLabsAPIError):
+            _combine_weighted(categories, ["3"], {"Occupancy": 0}, "Game Room")
+
+
 class ParseNeighborhoodResponseTest(unittest.TestCase):
     def test_mesquite_flat_shape(self):
         by_date, meta = parse_neighborhood_response(_mesquite_response(), None, "Mesquite")
@@ -122,6 +153,16 @@ class ParseNeighborhoodResponseTest(unittest.TestCase):
         self.assertEqual(meta["listings_used"], 23)
         self.assertEqual(meta["category_key"], "4")
 
+    def test_game_room_combines_multiple_buckets_when_category_is_a_list(self):
+        # 2026-10-06: this is the real config now -- PriceLabs' own
+        # persisted default for Game Room is bedroom range 3-5 combined,
+        # not the "4" bucket alone.
+        by_date, meta = parse_neighborhood_response(_game_room_response(), ["3", "4", "5"], "Game Room")
+        self.assertAlmostEqual(by_date["2026-11-13"]["occupancy"], 54.36274, places=4)
+        self.assertAlmostEqual(by_date["2026-11-14"]["occupancy"], 53.23530, places=4)
+        self.assertEqual(meta["listings_used"], 96 + 23 + 1)
+        self.assertEqual(meta["category_key"], "3,4,5")
+
     def test_raises_loudly_when_future_occ_data_missing(self):
         with self.assertRaises(PriceLabsAPIError):
             parse_neighborhood_response({"data": {}}, None, "Mesquite")
@@ -136,12 +177,14 @@ class ParseNeighborhoodResponseTest(unittest.TestCase):
 
 class BlendMarketDataTest(unittest.TestCase):
     def test_simple_average_across_two_listings(self):
+        # Game Room uses its real config now: the 3-5BR combined bucket,
+        # not "4" alone.
         mesquite_by_date, _ = parse_neighborhood_response(_mesquite_response(), None, "Mesquite")
-        game_room_by_date, _ = parse_neighborhood_response(_game_room_response(), "4", "Game Room")
+        game_room_by_date, _ = parse_neighborhood_response(_game_room_response(), ["3", "4", "5"], "Game Room")
         blended = blend_market_data({"Mesquite": mesquite_by_date, "Game Room": game_room_by_date})
-        # (71.4286 + 70.5882) / 2
-        self.assertAlmostEqual(blended["2026-11-13"]["market_occ_pct"], 71.0084, places=3)
-        self.assertAlmostEqual(blended["2026-11-14"]["market_occ_pct"], 60.9244, places=3)
+        # (71.4286 + 54.36274) / 2, (57.1429 + 53.23530) / 2
+        self.assertAlmostEqual(blended["2026-11-13"]["market_occ_pct"], 62.89567, places=3)
+        self.assertAlmostEqual(blended["2026-11-14"]["market_occ_pct"], 55.18910, places=3)
 
     def test_date_present_in_only_one_listing_still_included(self):
         a = {"2026-11-13": {"occupancy": 50, "occupancy_ly": 40, "occupancy_stly": 45}}

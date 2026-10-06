@@ -23,6 +23,17 @@ anything downstream has to care which listing it came from. Indexed by
 the response's own X_values date strings throughout, never by position --
 the two listings' series don't necessarily start on the same date.
 
+2026-10-06 correction: Game Room's neighborhood_category was originally
+set to just the "4" bucket (23 listings). Confirmed live (via
+get_neighborhood_data_sources) that PriceLabs' own *persisted default*
+comp-set source for this listing is actually Nearby Listings with bedroom
+range 3-5 COMBINED (94+23+1 = 118 listings) -- "4" alone was undercounting
+95 of those 118 listings. neighborhood_category can now be a list, which
+_resolve_category/_combine_weighted combine by weighted average (weighted
+by each bucket's own Listings Used, so the 94-listing "3" bucket isn't
+equal-weighted against the 1-listing "5" bucket) rather than picking one
+bucket alone.
+
 Pickup gap: this endpoint gives same-day snapshots (Occupancy, New
 Bookings, Canceled Bookings for each future date, as observed on the pull
 date) -- not a trailing pickup trend like the old Report Builder pickup
@@ -68,6 +79,67 @@ def _select_category(categories, category_key, listing_name):
     return categories[category_key]
 
 
+def _combine_weighted(categories, category_keys, label_index, listing_name):
+    """Weighted-combines several buckets of one listing's own comp set into
+    one series, weighted by each bucket's own Listings Used -- e.g. Game
+    Room's persisted PriceLabs default (confirmed live via
+    get_neighborhood_data_sources, 2026-10-06) is Nearby Listings, bedroom
+    range 3-5, which this endpoint exposes as separate per-bedroom-count
+    categories ("3","4","5") rather than one pre-combined one. Equal-
+    weighting them would let a 1-listing bucket count as much as a
+    94-listing one.
+
+    Returns (x_values, series) where series[label_i] is a flat list
+    aligned to x_values, same shape _select_category's caller gets.
+    """
+    missing = [k for k in category_keys if k not in categories]
+    if missing:
+        raise PriceLabsAPIError(
+            f"{listing_name}: configured neighborhood_category {list(category_keys)} is missing "
+            f"{missing} from this pull's categories ({list(categories.keys())}). PriceLabs may have "
+            "renamed its buckets -- check config.LISTINGS and update neighborhood_category."
+        )
+
+    buckets = [categories[k] for k in category_keys]
+    weights = [bucket.get("Listings Used") or 0 for bucket in buckets]
+    total_weight = sum(weights)
+    if total_weight <= 0:
+        raise PriceLabsAPIError(
+            f"{listing_name}: none of {list(category_keys)} report any Listings Used -- nothing to combine."
+        )
+
+    x_values = buckets[0]["X_values"]
+    per_bucket_series = [[_unwrap_y_values(bucket["Y_values"][i]) for i in range(len(label_index))] for bucket in buckets]
+
+    combined = []
+    for label_i in range(len(label_index)):
+        combined.append(
+            [
+                sum(per_bucket_series[b][label_i][date_i] * weights[b] for b in range(len(buckets))) / total_weight
+                for date_i in range(len(x_values))
+            ]
+        )
+    return x_values, combined, total_weight
+
+
+def _resolve_category(categories, category_key, label_index, listing_name):
+    """Returns (x_values, series, listings_used, resolved_label) -- series[i]
+    is always a flat list aligned to x_values, regardless of whether
+    category_key names one bucket (str/None) or several to weighted-
+    combine (list/tuple).
+    """
+    if isinstance(category_key, (list, tuple)):
+        x_values, series, listings_used = _combine_weighted(categories, category_key, label_index, listing_name)
+        resolved_label = ",".join(str(k) for k in category_key)
+        return x_values, series, listings_used, resolved_label
+
+    cat = _select_category(categories, category_key, listing_name)
+    x_values = cat["X_values"]
+    series = [_unwrap_y_values(y) for y in cat["Y_values"]]
+    resolved_label = category_key if category_key is not None else next(iter(categories.keys()))
+    return x_values, series, cat.get("Listings Used"), resolved_label
+
+
 def parse_neighborhood_response(resp, category_key, listing_name):
     """Returns (by_date, meta).
 
@@ -85,7 +157,6 @@ def parse_neighborhood_response(resp, category_key, listing_name):
         )
 
     categories = future_occ["Category"]
-    cat = _select_category(categories, category_key, listing_name)
     labels = future_occ["Labels"]
     label_index = {name: i for i, name in enumerate(labels)}
 
@@ -93,13 +164,12 @@ def parse_neighborhood_response(resp, category_key, listing_name):
     if missing:
         raise PriceLabsAPIError(f"{listing_name}: Neighborhood data is missing required label(s) {missing}.")
 
-    x_values = cat["X_values"]
-    occ = _unwrap_y_values(cat["Y_values"][label_index["Occupancy"]])
-    occ_ly = _unwrap_y_values(cat["Y_values"][label_index["Occupancy_LY"]])
-    occ_stly = _unwrap_y_values(cat["Y_values"][label_index["Occupancy_STLY"]])
-    new_bookings = (
-        _unwrap_y_values(cat["Y_values"][label_index["New Bookings"]]) if "New Bookings" in label_index else None
-    )
+    x_values, series, listings_used, resolved_label = _resolve_category(categories, category_key, label_index, listing_name)
+
+    occ = series[label_index["Occupancy"]]
+    occ_ly = series[label_index["Occupancy_LY"]]
+    occ_stly = series[label_index["Occupancy_STLY"]]
+    new_bookings = series[label_index["New Bookings"]] if "New Bookings" in label_index else None
 
     by_date = {}
     for i, date_str in enumerate(x_values):
@@ -112,8 +182,8 @@ def parse_neighborhood_response(resp, category_key, listing_name):
 
     meta = {
         "comp_set_name": payload.get("Neighborhood Data Source", "Unknown"),
-        "listings_used": cat.get("Listings Used"),
-        "category_key": category_key if category_key is not None else next(iter(categories.keys())),
+        "listings_used": listings_used,
+        "category_key": resolved_label,
     }
     return by_date, meta
 

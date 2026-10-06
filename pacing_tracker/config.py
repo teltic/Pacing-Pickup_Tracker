@@ -29,11 +29,19 @@ LISTINGS = [
         "listing_id": "0e251a6a-3ea4-4d32-878a-cd734591c925",
         "pms": "smartbnb",
         "name": "Game Room (5BR label, actually 4BR)",
-        # Its Neighborhood data buckets by bedroom count ("3","4","5","9");
-        # "4" (23 listings) is the real comp set -- "5" has just 1 listing
-        # and would be meaningless. A config setting, not hardcoded in the
-        # parser, since PriceLabs could change bucket membership over time.
-        "neighborhood_category": "4",
+        # 2026-10-06: corrected. Its Neighborhood data buckets by bedroom
+        # count ("3","4","5","9" on this account), but PriceLabs' own
+        # *persisted default* comp-set source for this listing (confirmed
+        # live via get_neighborhood_data_sources) is Nearby Listings with
+        # bedroom range 3-5 COMBINED (94+23+1 = 118 listings) -- not the
+        # "4" bucket alone (23 listings), which is what this was wrongly
+        # set to at first. A list here means "weighted-combine these
+        # buckets" (neighborhood_pull._resolve_category), weighted by each
+        # bucket's own Listings Used so the 94-listing "3" bucket isn't
+        # equal-weighted against the 1-listing "5" bucket. A config
+        # setting, not hardcoded in the parser, since PriceLabs could
+        # change bucket membership or the persisted default over time.
+        "neighborhood_category": ["3", "4", "5"],
     },
 ]
 

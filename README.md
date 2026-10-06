@@ -85,8 +85,10 @@ blended into every portfolio-level figure this tool pulled:
   currently `"simple_average"`). This isn't just a contamination fix —
   each listing's own PriceLabs comp set is a more precise match than one
   portfolio-wide figure (confirmed live: Mesquite's comp set is "Sleep 10
-  or more with pool", 7 listings; Game Room's is the 4BR bucket of
-  "Nearby Listings", 23 listings — genuinely different comp sets).
+  or more with pool", 7 listings; Game Room's is Nearby Listings, bedroom
+  range 3-5 combined, 118 listings — genuinely different comp sets, and
+  each one is the listing's own *persisted default* in PriceLabs, not an
+  arbitrary pick — confirmed via `get_neighborhood_data_sources`).
 
 (Aside, for anyone reading the git history: an *earlier* version of this
 script also used `neighborhood_data` for everything, before being
@@ -103,10 +105,23 @@ Game Room's comp set is split into bedroom-count categories (`"3"`, `"4"`,
 `"5"`, `"9"` on this account), with **double-nested** `Y_values` (needs an
 extra `[0]`) and 10 labels instead of 6. `neighborhood_pull.py` normalizes
 both to the same shape and indexes everything by the response's own date
-strings, never by position. Which bedroom bucket counts as Game Room's
-real comp set (`"4"`, 23 listings — not `"5"`, which has just 1) is a
-config setting (`config.LISTINGS[1]["neighborhood_category"]`), not
-hardcoded, since PriceLabs could rename or resplit its buckets later.
+strings, never by position.
+
+`config.LISTINGS[*]["neighborhood_category"]` picks which bucket(s) count
+as a listing's real comp set — `None` (Mesquite) auto-selects the one
+category present; a list (Game Room: `["3", "4", "5"]`) tells
+`neighborhood_pull._resolve_category`/`_combine_weighted` to combine
+several buckets, weighted by each bucket's own `Listings Used` (not
+equal-weighted, which would let a 1-listing bucket count as much as a
+94-listing one). **2026-10-06 correction**: this was originally just
+`"4"` (23 listings) — wrong. PriceLabs' own persisted default for Game
+Room (confirmed via `get_neighborhood_data_sources`) is Nearby Listings
+with bedroom range 3-5 *combined* (94+23+1 = 118 listings), and the
+weighted-combine of buckets `"3"`/`"4"`/`"5"` was checked directly against
+a CSV export of PriceLabs' own Neighborhood Data tab for Game Room —
+matched within rounding (e.g. 10/6 LY: 35.22% computed vs. 35.2%
+dashboard) across current occupancy, STLY, and LY alike, on every date
+checked.
 
 ### Pickup: snapshot diffing, not a direct field
 
@@ -317,11 +332,33 @@ just unit-tested.
 - **Game Room's 4BR-bucket Occupancy_LY for 11/13 and 11/14**: pulled
   live and parsed programmatically (not hand-transcribed) — `70.5882%`
   and `64.7059%`, matching the dashboard-reported ~70.6%/64.7% almost
-  exactly.
+  exactly. (Superseded 2026-10-06 — see below; the "4" bucket alone turned
+  out to be the wrong comp set, this was just confirming the plumbing
+  worked, not that "4" was correct.)
 - **The Listing Count guard works end-to-end**: after narrowing the
   Report Builder template's Listings filter in the PriceLabs dashboard, a
   fresh live pull showed `Listing Count: 2` on all 730 rows returned —
   confirmed via the live account, not just unit tests.
+
+## Verified against the live account (2026-10-06)
+
+- **The user flagged two pulls (9/29 and 10/6) as "too drastically
+  different to be using the same data."** Checked both files directly:
+  the 10/6 file's Mkt Occ % LY matched a fresh live pull exactly (e.g.
+  10/6: Mesquite 28.57% + Game Room 18.75%, averaged = 23.66% — exactly
+  what was in the file). The drastic difference was real but expected:
+  9/29 predates the Report Builder fix (still Park-City-contaminated),
+  and small comp sets (7-23 listings) are inherently choppier day to day
+  than whatever broader pool Report Builder's old portfolio figure used.
+- **Game Room's comp set was wrong, though** — the user separately
+  clarified Market Occupancy LY was supposed to represent bedroom range
+  3-5 combined, not just "4" (see the correction above). Confirmed
+  against a CSV the user exported directly from PriceLabs' own
+  Neighborhood Data tab for Game Room
+  (`Price_Occ_for_0e251a6a-....csv`): the weighted-combine of buckets
+  `"3"`/`"4"`/`"5"` matched that export within rounding across every date
+  checked, for current occupancy, STLY, and LY alike (e.g. 10/9 LY: 62.15%
+  computed vs. 62.1% in the export).
 
 ## Configuration
 
