@@ -16,7 +16,15 @@ import openpyxl
 FILENAME_RE = re.compile(r"Daily_Pacing_Pickup_(\d{1,2})\.(\d{1,2})\.(\d{2})\.xlsx$")
 
 # 0-based column indices within the Daily Pacing sheet's row tuples.
-COL_DATE, COL_SIGNAL, COL_OVERRIDE_REQUEST, COL_NOTES = 0, 15, 16, 17
+# 2026-10-07: shifted left (Pickup 3d/14d/30d/60d dropped) -- Signal=L,
+# Override Request=M, Notes=N.
+COL_DATE, COL_SIGNAL, COL_OVERRIDE_REQUEST, COL_NOTES = 0, 11, 12, 13
+
+# Sheets that hold a raw paste of a PriceLabs dashboard export (see
+# excel_report.py's module docstring) rather than anything this tool
+# computes -- carried forward verbatim on every regenerate so a fresh
+# daily file never wipes out the user's last paste.
+PASTED_SHEET_NAMES = ["Neighborhood Data - Mkt Occ", "Neighborhood Data - Compset Cal"]
 
 
 def parse_filename_date(filename):
@@ -90,3 +98,26 @@ def load_previous_state_for_folder(folder, pull_date):
     if previous_path is None:
         return {}
     return load_previous_state(previous_path)
+
+
+def copy_pasted_sheets(previous_path, target_wb):
+    """Copies every cell of PASTED_SHEET_NAMES from yesterday's workbook
+    into a freshly-generated one, verbatim (values, not formulas -- these
+    sheets are raw pastes and have none). A no-op if previous_path is None
+    (first run ever) or a sheet doesn't exist in the previous file (e.g.
+    the very first workbook built under this design). target_wb's sheets
+    are expected to already exist (excel_report.build_workbook creates
+    them, empty, before calling this).
+    """
+    if previous_path is None:
+        return
+    prev_wb = openpyxl.load_workbook(previous_path, data_only=True)
+    for sheet_name in PASTED_SHEET_NAMES:
+        if sheet_name not in prev_wb.sheetnames:
+            continue
+        prev_ws = prev_wb[sheet_name]
+        target_ws = target_wb[sheet_name] if sheet_name in target_wb.sheetnames else target_wb.create_sheet(sheet_name)
+        for row in prev_ws.iter_rows():
+            for cell in row:
+                if cell.value is not None:
+                    target_ws.cell(row=cell.row, column=cell.column, value=cell.value)

@@ -20,11 +20,11 @@ def _write_workbook(path, rows):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Daily Pacing"
-    ws.append(["Date"] + [f"col{i}" for i in range(1, 24)])
+    ws.append(["Date"] + [f"col{i}" for i in range(1, 21)])
     for d, override_request, notes in rows:
-        row = [d] + [None] * 23
-        row[16] = override_request  # Q
-        row[17] = notes  # R
+        row = [d] + [None] * 20
+        row[12] = override_request  # M
+        row[13] = notes  # N
         ws.append(row)
     wb.save(path)
 

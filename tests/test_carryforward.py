@@ -6,6 +6,7 @@ from datetime import date
 import openpyxl
 
 from pacing_tracker.carryforward import (
+    copy_pasted_sheets,
     find_latest_file,
     find_previous_file,
     load_previous_state,
@@ -16,17 +17,17 @@ from pacing_tracker.carryforward import (
 
 def _write_fake_workbook(path, rows):
     """rows: list of (date, signal, override_request, notes) -- mimics the
-    Daily Pacing sheet's columns A/P/Q/R (indices 0/15/16/17).
+    Daily Pacing sheet's columns A/L/M/N (indices 0/11/12/13).
     """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Daily Pacing"
-    ws.append(["Date"] + [f"col{i}" for i in range(1, 24)])  # A..X header
+    ws.append(["Date"] + [f"col{i}" for i in range(1, 21)])  # A..U header
     for d, signal, override_request, notes in rows:
-        row = [d] + [None] * 23
-        row[15] = signal
-        row[16] = override_request
-        row[17] = notes
+        row = [d] + [None] * 20
+        row[11] = signal
+        row[12] = override_request
+        row[13] = notes
         ws.append(row)
     wb.save(path)
 
@@ -94,6 +95,37 @@ class LoadPreviousStateTest(unittest.TestCase):
     def test_for_folder_returns_empty_dict_when_no_history(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(load_previous_state_for_folder(tmp, date(2026, 9, 12)), {})
+
+
+class CopyPastedSheetsTest(unittest.TestCase):
+    def test_copies_every_cell_from_the_previous_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prev_path = os.path.join(tmp, "prev.xlsx")
+            prev_wb = openpyxl.Workbook()
+            prev_ws = prev_wb.active
+            prev_ws.title = "Neighborhood Data - Mkt Occ"
+            prev_ws["A1"] = "Date"
+            prev_ws["B1"] = "Market Occupancy"
+            prev_ws["A2"] = "2026-09-12"
+            prev_ws["B2"] = 42.0
+            prev_wb.create_sheet("Neighborhood Data - Compset Cal")
+            prev_wb.save(prev_path)
+
+            target_wb = openpyxl.Workbook()
+            target_wb.create_sheet("Neighborhood Data - Mkt Occ")
+            target_wb.create_sheet("Neighborhood Data - Compset Cal")
+            copy_pasted_sheets(prev_path, target_wb)
+
+            ws = target_wb["Neighborhood Data - Mkt Occ"]
+            self.assertEqual(ws["A1"].value, "Date")
+            self.assertEqual(ws["B1"].value, "Market Occupancy")
+            self.assertEqual(ws["B2"].value, 42.0)
+
+    def test_noop_when_there_is_no_previous_file(self):
+        target_wb = openpyxl.Workbook()
+        target_wb.create_sheet("Neighborhood Data - Mkt Occ")
+        copy_pasted_sheets(None, target_wb)  # must not raise
+        self.assertIsNone(target_wb["Neighborhood Data - Mkt Occ"]["A1"].value)
 
 
 if __name__ == "__main__":

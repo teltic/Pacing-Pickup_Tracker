@@ -7,24 +7,22 @@ implements.
 
 ## Status
 
-- [x] Data pull (`pacing_tracker/data_pull.py`) — pulls Occupancy %/
+- [x] Data pull (`pacing_tracker/data_pull.py`) — pulls only Occupancy %/
       Weekday/Events from Report Builder (scoped to exactly these 2
-      listings, guarded against scope drift) and Mkt Occ %/STLY/LY/
-      Pickup 3/7/14/30/60d from each listing's own Neighborhood data,
-      blended (`neighborhood_pull.py`, `pickup_snapshots.py`), for the
-      next 366 days (today through +365). Verified end-to-end against the
-      live account, including the 2026-10-05 rebuild off Neighborhood
-      data after a 3rd listing (Park City) silently contaminated the
-      portfolio-level figures Report Builder used to supply for these
-      columns — see "How pacing/pickup is sourced" below.
+      listings, guarded against scope drift), for the next 366 days
+      (today through +365). Verified end-to-end against the live account.
+      (Mkt Occ %/STLY/LY/Pickup used to also be pulled here — see "How
+      pacing/pickup is sourced" below for why that moved to manual paste
+      on 2026-10-07.)
 - [x] Excel report generation (`pacing_tracker/excel_report.py`) — builds
       the Daily Pacing workbook with live formulas (Pace vs STLY, Signal,
-      Suggested Bump, Override Status, New Since Last Review), matching a
-      real reference workbook the user built via chat-based Claude.
-      Formulas verified by direct comparison against that file's actual
-      cell contents. Verified end-to-end (generated, opened in Excel, no
-      formula errors, conditional formatting renders correctly) against
-      the live account.
+      Suggested Bump, Override Status, New Since Last Review, and — as of
+      2026-10-07 — Mkt Occ %/STLY/LY/Pickup 7d itself, now `VLOOKUP`
+      formulas into a pasted tab), matching a real reference workbook the
+      user built via chat-based Claude. Formulas verified by direct
+      comparison against that file's actual cell contents. Verified
+      end-to-end (generated, opened in Excel, no formula errors,
+      conditional formatting renders correctly) against the live account.
 - [x] Push mode (`pacing_tracker/push.py`) — reads Override Request/Notes
       from a reviewed workbook and pushes them to PriceLabs as
       date-specific percent overrides. Dry-run by default. Verified
@@ -65,96 +63,93 @@ python3 -m pacing_tracker.data_pull --out data/pull_today.json
 
 ## How pacing/pickup is sourced
 
-**2026-10-05: this is now a hybrid of two sources**, after a 3rd listing
-(Park City, added to the account for a different market) got silently
-blended into every portfolio-level figure this tool pulled:
+**2026-10-07: market data moved off this tool's own PriceLabs API pull
+entirely, onto manual paste.** Short version: an API-based pull of a
+multi-category, weighting-sensitive comp-set figure got rebuilt twice in
+three days (first moving off Report Builder's portfolio blend, then
+fixing a wrong comp-set bucket) and still produced a scare that read as
+"the data pull doesn't work" from the outside — see "Verified against
+the live account (2026-10-07)" below for the full postmortem. Rather than
+rebuild it a third time, Mkt Occ %/STLY/LY/Pickup 7d and comp-set prices
+now come from pasting PriceLabs' own dashboard exports directly, read
+live by Excel formulas. What you see pasted is exactly what PriceLabs'
+own UI says — nothing computed or re-aggregated by this tool for the
+parts that kept breaking.
 
 - **Occupancy %, Weekday, Events** still come from PriceLabs' **Report
   Builder** ("Master Sheet - TB" template) via `report_builder/templates`,
-  `report_builder/data`, and `report_builder/poll`. The template is scoped
-  in the PriceLabs dashboard (Portfolio Analytics → Report Builder →
-  Listings filter) to just the 2 configured listings. Every row carries a
-  `Listing Count` — `data_pull._check_listing_count()` hard-fails the pull
-  (no file written) if that's ever anything other than
-  `len(config.LISTINGS)`, so a scope drift like Park City's can't happen
+  `report_builder/data`, and `report_builder/poll` — this part of the
+  pipeline was never the problem. The template is scoped in the PriceLabs
+  dashboard (Portfolio Analytics → Report Builder → Listings filter) to
+  just the 2 configured listings. Every row carries a `Listing Count` —
+  `data_pull._check_listing_count()` hard-fails the pull (no file written)
+  if that's ever anything other than `len(config.LISTINGS)`, so a scope
+  drift (a 3rd listing silently added to the template) can't happen
   silently again.
-- **Mkt Occ %, Mkt Occ % STLY, Mkt Occ % LY, and Pickup 3/7/14/30/60d**
-  come from each listing's own **Neighborhood data**
-  (`neighborhood_pull.py`, endpoint `GET /v1/neighborhood_data`) instead of
-  Report Builder, and are blended together (`config.MARKET_BLEND_METHOD`,
-  currently `"simple_average"`). This isn't just a contamination fix —
-  each listing's own PriceLabs comp set is a more precise match than one
-  portfolio-wide figure (confirmed live: Mesquite's comp set is "Sleep 10
-  or more with pool", 7 listings; Game Room's is Nearby Listings, bedroom
-  range 3-5 combined, 118 listings — genuinely different comp sets, and
-  each one is the listing's own *persisted default* in PriceLabs, not an
-  arbitrary pick — confirmed via `get_neighborhood_data_sources`).
+- **Mkt Occ %, Mkt Occ % STLY, Mkt Occ % LY, and Pickup 7d** are
+  `VLOOKUP`-by-date Excel formulas on Daily Pacing (columns D/E/F/H) that
+  read whatever's pasted into the **"Neighborhood Data - Mkt Occ"** tab —
+  one listing's PriceLabs Neighborhood Data dashboard export (Date, Market
+  Occupancy, "last year today" [STLY], "last year final" [LY], 7-day
+  pickup, percentile prices, ...), pasted in whole, headers included.
+  `data_pull.py`/`excel_report.py` never touch these numbers.
+- **Comp-set prices and blended occupancy** (for comparison, not used by
+  Daily Pacing's Signal/Suggested Bump) live on the **"Compset Data"**
+  tab, computed from whatever's pasted into the **"Neighborhood Data -
+  Compset Cal"** tab — a separate comp-set calendar export (per comp
+  listing: price/availability/min_stay, forward-looking only, no LY — by
+  design; see below).
 
-(Aside, for anyone reading the git history: an *earlier* version of this
-script also used `neighborhood_data` for everything, before being
-replaced by Report Builder on 2026-09-12 once Report Builder turned out
-to be reachable from a plain API key too. This isn't that old approach
-coming back wholesale — only the market columns moved, and the reasoning
-this time is precision/contamination, not reachability.)
+### The two paste-target tabs
 
-### Response shapes (confirmed live, not assumed)
+Paste PriceLabs' own CSV exports into these starting at cell A1, headers
+included, overwriting whatever was there — this tool never rewrites
+their headers, so whatever PriceLabs exports is exactly what ends up in
+the cell:
 
-The two listings' Neighborhood responses have different shapes:
-Mesquite has exactly one comp-set category, with flat `Y_values` arrays;
-Game Room's comp set is split into bedroom-count categories (`"3"`, `"4"`,
-`"5"`, `"9"` on this account), with **double-nested** `Y_values` (needs an
-extra `[0]`) and 10 labels instead of 6. `neighborhood_pull.py` normalizes
-both to the same shape and indexes everything by the response's own date
-strings, never by position.
+- **"Neighborhood Data - Mkt Occ"**: one listing's Neighborhood Data
+  occupancy-trend export. This is the only source for Daily Pacing's
+  Mkt Occ %/STLY/LY/Pickup 7d.
+- **"Neighborhood Data - Compset Cal"**: a comp-set calendar export (one
+  `guest_prices`/`available`/`min_stay` column triplet per comp listing,
+  "Your Listing" always last). **Deliberately forward-only, no LY** — the
+  user was explicit about this: it's a calendar snapshot, not a trend, and
+  manufacturing an LY figure out of it would just reintroduce the kind of
+  computed-not-sourced number that caused the last two rebuilds' trouble.
 
-`config.LISTINGS[*]["neighborhood_category"]` picks which bucket(s) count
-as a listing's real comp set — `None` (Mesquite) auto-selects the one
-category present; a list (Game Room: `["3", "4", "5"]`) tells
-`neighborhood_pull._resolve_category`/`_combine_weighted` to combine
-several buckets, weighted by each bucket's own `Listings Used` (not
-equal-weighted, which would let a 1-listing bucket count as much as a
-94-listing one). **2026-10-06 correction**: this was originally just
-`"4"` (23 listings) — wrong. PriceLabs' own persisted default for Game
-Room (confirmed via `get_neighborhood_data_sources`) is Nearby Listings
-with bedroom range 3-5 *combined* (94+23+1 = 118 listings), and the
-weighted-combine of buckets `"3"`/`"4"`/`"5"` was checked directly against
-a CSV export of PriceLabs' own Neighborhood Data tab for Game Room —
-matched within rounding (e.g. 10/6 LY: 35.22% computed vs. 35.2%
-dashboard) across current occupancy, STLY, and LY alike, on every date
-checked.
+Re-paste either tab whenever you want fresh numbers — there's no forced
+cadence. A daily regenerate (`run_daily.bat`) carries both tabs forward
+unchanged from yesterday's file (`carryforward.copy_pasted_sheets`), so
+running the daily script never wipes your last paste.
 
-### Pickup: snapshot diffing, not a direct field
+### Compset Data tab
 
-Neighborhood data gives a same-day snapshot (today's Occupancy/New
-Bookings/Canceled Bookings for each future date), not a trailing pickup
-trend — there's no field to read for "how much did this change over the
-last 7 days." `pickup_snapshots.py` saves each day's blended
-Mkt-Occ-%-by-date to `config.PICKUP_SNAPSHOT_FOLDER`, and computes
-Pickup Nd as today's value minus the snapshot from exactly N days ago.
-**Blank, not estimated, until that snapshot exists** — a fresh pull
-history starts empty and fills in day by day, the same way
-`carryforward.py`'s Override Request/Notes history does.
+Blends the pasted comp-set calendar into its own occupancy % (column B:
+`100 * (listings unavailable) / (listings in the comp set)`) and 25th/
+50th/75th/90th percentile prices (columns C:F, via `PERCENTILE.INC` over
+the comp listings' `guest_prices`, excluding "Your Listing") — then places
+the same figures straight from the pasted Mkt Occ tab alongside (columns
+G:M: Market Occ %, percentile prices, Median Booked Price, # Bookings),
+so the two can be eyeballed side by side. This assumes the comp-set
+calendar's current shape (7 comp listings + "Your Listing", columns B:Y)
+— `excel_report.COMPSET_CAL_PRICE_COLS`/`COMPSET_CAL_AVAILABLE_COLS` are
+the only thing that needs editing if PriceLabs' comp-set size changes.
 
-### Trust guards
+### Trust guards that remain
 
-- Either listing's Neighborhood data coming back empty is a hard failure
-  (`neighborhood_pull.fetch_and_parse_listing_market`), never a silent
-  skip or a zero.
-- The **How To Use** tab's Data Source block shows, per listing, which
-  comp set was actually used (`Neighborhood Data Source`), how many
-  listings it covers, and the pull timestamp — so a number that looks
-  wrong can be checked against its real source.
-- `data_pull._warn_on_unexpected_listings()` logs (doesn't fail) a warning
-  if the account has listings beyond the 2 configured here — this is the
-  guard that would have caught Park City immediately. Its endpoint
-  (`PriceLabsClient.get_all_listings`, `GET /v1/listings`) isn't confirmed
-  live the way the rest of this file's endpoints are, so a failure there
-  logs "couldn't check" rather than blocking the pull.
-- A quick sanity-check log line prints 11/13 and 11/14's LY occupancy on
-  every pull (`data_pull.SANITY_CHECK_DATES`) — these were directly
-  compared against PriceLabs' own dashboard during this rebuild
-  (Mesquite ~71.4%/57.1%, Game Room ~70.6%/64.7%). Not load-bearing,
-  just a fast eyeball check; safe to clear once you trust the rebuild.
+- `_check_listing_count()` still hard-fails the pull if Report Builder's
+  scope ever drifts beyond the 2 configured listings (unrelated to the
+  market-data rebuild above — this guards Occupancy %/Weekday/Events).
+- `data_pull._warn_on_unexpected_listings()` still logs (doesn't fail) a
+  warning if the account has listings beyond the 2 configured here. Its
+  endpoint (`PriceLabsClient.get_all_listings`, `GET /v1/listings`) isn't
+  confirmed live, so a failure there logs "couldn't check" rather than
+  blocking the pull.
+- There's deliberately **no** guard trying to validate the pasted tabs'
+  contents — the whole point of this rebuild was to stop computing/
+  re-aggregating a figure that kept being subtly wrong; validating a raw
+  paste against itself wouldn't catch anything a guard could meaningfully
+  check.
 
 `data_pull.py` looks up the Report Builder template by name
 (`config.REPORT_BUILDER_TEMPLATE_NAME`, not a hardcoded template_id,
@@ -179,11 +174,21 @@ spec text alone.
 
 A few things worth knowing about how it works:
 
-- **Occupancy/Market Occ/LY/STLY/Pickup are raw pulled values, not
-  formulas** — they can't recalculate from anything else, they *are* the
-  data. Pace vs STLY, the two ratio columns, Suggested Bump, Signal, Days
-  Out, Median Booking Window, Override Status, and New Since Last Review
-  are all live formulas.
+- **Occupancy % (column C) is still a raw pulled value** (your own
+  listings' booked status, from Report Builder) — it can't recalculate
+  from anything else, it *is* the data. **Mkt Occ %/STLY/LY/Pickup 7d
+  (D/E/F/H) are now `VLOOKUP` formulas** into the pasted "Neighborhood
+  Data - Mkt Occ" tab (2026-10-07 — see "How pacing/pickup is sourced"
+  above), not pulled values. Pace vs STLY, the two ratio columns,
+  Suggested Bump, Signal, Days Out, Median Booking Window, Override
+  Status, and New Since Last Review are all live formulas, same as
+  before.
+- **Pickup 3d/14d/30d/60d are gone** (2026-10-07) — the pasted Mkt Occ
+  export only gives a 7-day pickup figure, so Signal/Suggested Bump's
+  "Elevated 30/60d"/"+5% (watch)" branches (which depended on them) were
+  removed rather than left as dead code with nothing feeding them. Every
+  column after G shifted left accordingly — see `excel_report.COL` for
+  the current letter for each field.
 - **Suggested Note bakes in the pull date as a literal string** (e.g.
   `"9/12 - Pacing behind by..."`), matching the reference file — it's a
   timestamp of when the observation was made, not a `TODAY()` formula that
@@ -202,10 +207,12 @@ A few things worth knowing about how it works:
   Drive desktop app — this only ever touches plain files on disk, no
   Drive API/OAuth. Set via the `PACING_DRIVE_SYNC_FOLDER` env var (or in
   `.env`, same as the API key); defaults to `data/` if unset.
-- Only the **Daily Pacing** and **Booking Window** sheets are generated —
-  the reference file's How To Use / Daily Process / Properties & Overrides
-  tabs were left out (by choice) to keep the generator focused on the data
-  itself.
+- The workbook now has **7 sheets**: **Daily Pacing** (the main sheet),
+  **Booking Window**, **Daily Review Steps**, **How To Use** (now plain
+  instructions for the paste workflow, not a Data Source table — there's
+  no more per-pull API data to show), **Neighborhood Data - Mkt Occ** and
+  **Neighborhood Data - Compset Cal** (paste targets, see above), and
+  **Compset Data** (computed comparison, see above).
 
 Run it:
 
@@ -233,8 +240,8 @@ rendered invisibly. Fixed and covered by a regression test.
 
 ## Push mode
 
-`pacing_tracker/push.py` reads Override Request (column Q) and Notes
-(column R) from a reviewed workbook and pushes them to PriceLabs as
+`pacing_tracker/push.py` reads Override Request (column M) and Notes
+(column N) from a reviewed workbook and pushes them to PriceLabs as
 date-specific `price_type: "percent"` overrides, per the spec's push
 workflow:
 
@@ -360,23 +367,52 @@ just unit-tested.
   checked, for current occupancy, STLY, and LY alike (e.g. 10/9 LY: 62.15%
   computed vs. 62.1% in the export).
 
+## Verified against the live account (2026-10-07) — why the API pull was retired
+
+Even after the 10/6 fix above, the user compared two workbooks (9/29 and
+10/6) a *second* time and flagged "Mkt Occ % LY shouldn't change between
+pulls for the same calendar date" — correctly, since that's a historical
+fact that's already happened. Checked both files directly:
+
+- The 10/6 file's "How To Use" tab (added 2026-10-05) showed its own pull
+  timestamp and comp-set bucket used: pulled at `17:29:44` that day, using
+  Game Room's `"4"`-only bucket — i.e. **before** the 23:44 fix that
+  corrected it to the weighted 3-5BR combine. The 9/29 file had no "How To
+  Use" tab at all, meaning it predated the whole Neighborhood-data rebuild
+  (still on the old Report-Builder-blended source). So the two files
+  weren't just "different pulls" — they were two different, both-since-
+  corrected versions of the pipeline, which is exactly why they looked
+  "too drastically different."
+- That explained the mismatch, but not well: a non-technical user
+  comparing two files he was told to trust, finding them wildly
+  inconsistent twice in three days, and needing a from-scratch forensic
+  read of hidden metadata to find out why, is a real trust failure
+  regardless of whether the underlying fix was eventually correct each
+  time. "Technically explainable" isn't the same as "reliable enough to
+  hand to someone who isn't going to open a Python file-timestamp
+  comparison every time a number looks off."
+
+Decision: retire this tool's own API pull of Mkt Occ %/STLY/LY/Pickup for
+good, rather than attempt a third fix. See "How pacing/pickup is sourced"
+above for the manual-paste design that replaced it.
+
 ## Configuration
 
 Listings, thresholds, and the median-booking-window reference table all
 live in `pacing_tracker/config.py` as plain data — no thresholds are
 hardcoded into the pacing/signal/bump logic; they're all cell references
-(`$AA$2` etc.) into the threshold block `excel_report.py` writes onto the
+(`$W$2` etc., 2026-10-07 — shifted from `$AA$` when Pickup 3d/14d/30d/60d
+were dropped) into the threshold block `excel_report.py` writes onto the
 Daily Pacing sheet itself, editable there without touching any formula.
 
-`LISTINGS` is used directly by `data_pull.py` now (2026-10-05): each
-entry's `listing_id`/`pms` drives its own Neighborhood data pull, and
-`neighborhood_category` picks which comp-set category/bucket counts as
-that listing's real comp set (`None` when there's only one category,
-like Mesquite; a specific key like `"4"` when the listing's comp set is
-split into buckets, like Game Room's bedroom-count buckets). Adding a
-listing here means adding it to the Report Builder template's Listings
-filter too, or `_check_listing_count()` will correctly refuse to trust
-the pull.
+`LISTINGS` is used by `data_pull.py`'s Report Builder guards
+(`_check_listing_count`/`_warn_on_unexpected_listings`) — each entry's
+`listing_id`/`pms`/`name` identifies one of the 2 listings Report
+Builder's template should be scoped to. Adding a listing here means
+adding it to the Report Builder template's Listings filter too, or
+`_check_listing_count()` will correctly refuse to trust the pull. (It no
+longer drives any Neighborhood-data pull — see "How pacing/pickup is
+sourced" above.)
 
 ### Rule changes since the reference file
 

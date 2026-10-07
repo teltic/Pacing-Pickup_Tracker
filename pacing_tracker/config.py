@@ -22,26 +22,11 @@ LISTINGS = [
         "listing_id": "dec5d2ed-4400-4350-8df3-af76b5d3d09c",
         "pms": "smartbnb",
         "name": "Mesquite Vacation Rental",
-        # Its own Neighborhood data has exactly one comp-set category --
-        "neighborhood_category": None,
     },
     {
         "listing_id": "0e251a6a-3ea4-4d32-878a-cd734591c925",
         "pms": "smartbnb",
         "name": "Game Room (5BR label, actually 4BR)",
-        # 2026-10-06: corrected. Its Neighborhood data buckets by bedroom
-        # count ("3","4","5","9" on this account), but PriceLabs' own
-        # *persisted default* comp-set source for this listing (confirmed
-        # live via get_neighborhood_data_sources) is Nearby Listings with
-        # bedroom range 3-5 COMBINED (94+23+1 = 118 listings) -- not the
-        # "4" bucket alone (23 listings), which is what this was wrongly
-        # set to at first. A list here means "weighted-combine these
-        # buckets" (neighborhood_pull._resolve_category), weighted by each
-        # bucket's own Listings Used so the 94-listing "3" bucket isn't
-        # equal-weighted against the 1-listing "5" bucket. A config
-        # setting, not hardcoded in the parser, since PriceLabs could
-        # change bucket membership or the persisted default over time.
-        "neighborhood_category": ["3", "4", "5"],
     },
 ]
 
@@ -66,46 +51,27 @@ FORECAST_DAYS = 366
 # template list changes.
 #
 # 2026-10-05: this template now supplies ONLY Occupancy %, Weekday, and
-# Events. It used to also supply Mkt Occ %/STLY/LY and pickup, but those
-# are portfolio-level (blended across whatever listings the template's own
-# scope includes) -- when a 3rd listing (Park City) was added to the
-# account, it silently widened that blend without anyone changing this
-# tool's config. Those columns now come from each listing's own
-# Neighborhood data instead (see neighborhood_pull.py), which is scoped
-# per-listing by PriceLabs itself, not by this template's own filter.
-# data_pull._check_listing_count() still guards Occupancy %/Events against
-# the same kind of scope drift happening again.
+# Events -- your own two listings' booked status, not market data.
+# data_pull._check_listing_count() guards against this template's Listings
+# filter ever silently widening again (exactly how a 3rd listing, Park
+# City, got caught contaminating these columns on 2026-10-05).
+#
+# 2026-10-07: Mkt Occ %/STLY/LY and Pickup 7d moved OFF this tool's own API
+# pull entirely (see the module docstring in excel_report.py for why -- two
+# straight days of wrong/stale numbers from a bedroom-bucket bug and a
+# stale-pull mismatch). They're now manual pastes of PriceLabs' own
+# dashboard exports, read live by Excel formulas on Daily Pacing.
 
 REPORT_BUILDER_TEMPLATE_NAME = "Master Sheet - TB"
-
-PICKUP_WINDOWS_DAYS = [3, 7, 14, 30, 60]
-
-# --- Neighborhood data source (Mkt Occ %/STLY/LY, pickup) -------------------
-# Each listing's own comp-set data (see config.LISTINGS' neighborhood_category
-# for how Game Room's bedroom-count bucket is picked). Blended across the two
-# listings into the single Mkt Occ % column series the sheet has always had.
-#
-# "simple_average" is the only method implemented so far -- a config toggle
-# now so a later switch (e.g. weighting by each listing's own Listings Used,
-# or splitting into one sheet per comp set instead of blending at all) is a
-# config change, not a rewrite.
-MARKET_BLEND_METHOD = "simple_average"
-
-# Where daily Occupancy-by-date snapshots are saved so pickup (which
-# Neighborhood data doesn't provide directly -- see neighborhood_pull.py's
-# module docstring) can be computed as today's occupancy for a date minus
-# that same date's occupancy from N days ago, once enough history exists.
-PICKUP_SNAPSHOT_FOLDER = os.environ.get("PACING_SNAPSHOT_FOLDER", os.path.join("data", "occupancy_snapshots"))
 
 # --- Thresholds (spec section "Threshold values") ---------------------------
 
 THRESHOLDS = {
     "pace_threshold": 5,
-    "pickup_3d_threshold": 1.5,
+    # 2026-10-07: Pickup 3d/14d/30d/60d dropped along with their thresholds
+    # -- PriceLabs' own "Mkt Occ" dashboard export (now the pasted source
+    # for pickup, see excel_report.py) only gives a 7-day pickup figure.
     "pickup_7d_threshold": 3,
-    "pickup_14d_threshold": 5,
-    "pickup_30d_threshold": 10,
-    "pickup_60d_threshold": 14,
     "weekday_ly_cut_pct": 25,
     "weekend_ly_cut_pct": 40,
     # The Low-LY cut's severity: originally flat -10% (see spec), raised to
