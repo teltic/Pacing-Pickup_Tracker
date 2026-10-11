@@ -7,6 +7,8 @@ from pacing_tracker.data_pull import (
     _find_template_id,
     _parse_row,
     _warn_on_unexpected_listings,
+    combine_live_overrides,
+    fetch_live_overrides,
     fetch_report_rows,
     run_pull,
 )
@@ -57,6 +59,13 @@ class FakeClient:
         # warning. Override self.all_listings_ids to test other cases.
         ids = getattr(self, "all_listings_ids", [MESQUITE_ID, GAME_ROOM_ID])
         return {"listings": [{"listing_id": lid} for lid in ids]}
+
+    def get_listing_date_overrides(self, listing_id, pms, start_date=None, end_date=None):
+        # Default: no live overrides for anyone. Set
+        # self.overrides_by_listing = {listing_id: [{"date", "price", "reason"}, ...]}
+        # to test a populated case.
+        overrides = getattr(self, "overrides_by_listing", {}).get(listing_id, [])
+        return {"data": {"overrides": overrides}}
 
 
 class FindTemplateIdTest(unittest.TestCase):
@@ -173,15 +182,95 @@ class RunPullTest(unittest.TestCase):
         records = run_pull(client, pull_date="2026-09-12", forecast_days=1)
         self.assertEqual(len(records), 1)
 
-    def test_records_only_carry_occupancy_and_events(self):
+    def test_records_only_carry_occupancy_events_and_live_override(self):
         templates = [{"templateId": 3078, "name": "Master Sheet - TB"}]
         rows = [_row("2026-09-12", "07.Sat", Occupancy=42.0)]
         client = FakeClient(templates, rows)
         records = run_pull(client, pull_date="2026-09-12", forecast_days=1, template_name="Master Sheet - TB")
         self.assertEqual(
             records[0],
-            {"date": "2026-09-12", "weekday": "07.Sat", "occupancy_pct": 42.0, "events": None},
+            {"date": "2026-09-12", "weekday": "07.Sat", "occupancy_pct": 42.0, "events": None, "live_override": ""},
         )
+
+    def test_live_override_column_is_populated_from_both_listings(self):
+        templates = [{"templateId": 3078, "name": "Master Sheet - TB"}]
+        rows = [_row("2026-09-12", "07.Sat")]
+        client = FakeClient(templates, rows)
+        client.overrides_by_listing = {
+            MESQUITE_ID: [{"date": "2026-09-12", "price": "-10", "reason": "9/12 - behind"}],
+            GAME_ROOM_ID: [{"date": "2026-09-12", "price": "-10", "reason": "9/12 - behind"}],
+        }
+        records = run_pull(client, pull_date="2026-09-12", forecast_days=1, template_name="Master Sheet - TB")
+        self.assertEqual(records[0]["live_override"], "-10% — 9/12 - behind")
+
+    def test_live_override_column_blank_on_fetch_failure(self):
+        templates = [{"templateId": 3078, "name": "Master Sheet - TB"}]
+        rows = [_row("2026-09-12", "07.Sat")]
+        client = FakeClient(templates, rows)
+
+        def _raise(*a, **k):
+            raise RuntimeError("boom")
+
+        client.get_listing_date_overrides = _raise
+        with self.assertLogs("pacing_tracker.data_pull", level="WARNING"):
+            records = run_pull(client, pull_date="2026-09-12", forecast_days=1, template_name="Master Sheet - TB")
+        self.assertEqual(records[0]["live_override"], "")
+
+
+class FetchLiveOverridesTest(unittest.TestCase):
+    def test_reads_each_listings_overrides_by_date(self):
+        templates = [{"templateId": 3078, "name": "Master Sheet - TB"}]
+        client = FakeClient(templates, [])
+        client.overrides_by_listing = {
+            MESQUITE_ID: [{"date": "2026-09-12", "price": "-10", "reason": "test"}],
+        }
+        by_listing = fetch_live_overrides(client, config.LISTINGS, "2026-09-01", "2026-09-30")
+        self.assertEqual(
+            by_listing["Mesquite Vacation Rental"]["2026-09-12"],
+            {"price": "-10", "reason": "test"},
+        )
+        self.assertEqual(by_listing["Game Room (5BR label, actually 4BR)"], {})
+
+
+class CombineLiveOverridesTest(unittest.TestCase):
+    def test_blank_when_neither_listing_has_an_override(self):
+        by_listing = {"A": {}, "B": {}}
+        self.assertEqual(combine_live_overrides(by_listing, "2026-09-12"), "")
+
+    def test_agreeing_listings_collapse_to_one_value(self):
+        by_listing = {
+            "A": {"2026-09-12": {"price": "-10", "reason": "behind"}},
+            "B": {"2026-09-12": {"price": "-10", "reason": "behind"}},
+        }
+        self.assertEqual(combine_live_overrides(by_listing, "2026-09-12"), "-10% — behind")
+
+    def test_no_reason_omits_the_dash(self):
+        by_listing = {
+            "A": {"2026-09-12": {"price": "-10", "reason": ""}},
+            "B": {"2026-09-12": {"price": "-10", "reason": ""}},
+        }
+        self.assertEqual(combine_live_overrides(by_listing, "2026-09-12"), "-10%")
+
+    def test_differing_prices_are_flagged(self):
+        by_listing = {
+            "Mesquite": {"2026-09-12": {"price": "-10", "reason": "behind"}},
+            "Game Room": {"2026-09-12": {"price": "-5", "reason": "behind"}},
+        }
+        result = combine_live_overrides(by_listing, "2026-09-12")
+        self.assertTrue(result.startswith("⚠ differs: "))
+        self.assertIn("Mesquite: -10% — behind", result)
+        self.assertIn("Game Room: -5% — behind", result)
+
+    def test_one_listing_missing_an_override_is_flagged(self):
+        # Pushed to both normally -- one having nothing while the other
+        # has something is drift worth surfacing, not "no override".
+        by_listing = {
+            "Mesquite": {"2026-09-12": {"price": "-10", "reason": "behind"}},
+            "Game Room": {},
+        }
+        result = combine_live_overrides(by_listing, "2026-09-12")
+        self.assertTrue(result.startswith("⚠ differs: "))
+        self.assertIn("Game Room: none", result)
 
 
 if __name__ == "__main__":

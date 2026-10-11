@@ -30,22 +30,22 @@ from pacing_tracker.excel_report import (
 # in the original reference file to extract from.
 EXPECTED_SUGGESTED_BUMP_ROW2 = (
     '=IF(C2=100,"",IF(AND(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),'
-    '$X$12,$X$11),G2<$X$13),-$X$19/100,IF(AND(F2>=$X$16,IFERROR(P2>=$X$17*Q2,FALSE()),'
-    'G2<-$X$2,G2>=-$X$18),"Hold - high LY, outside window",IF(AND(G2<-$X$2,J2>1),'
-    '"⚠ Mixed – review",IF(G2<-$X$2,-IF(I2>2.5,20,IF(I2>1.5,10,5))/100,'
-    'IF(AND(J2>1,G2<=$X$2,P2<=Q2),"Hold - within booking window",'
-    'IF(OR(G2>$X$2,J2>1),IF(MAX(I2,J2)>IF(F2>=$X$14,$X$15,2.5),20,'
+    '$Y$12,$Y$11),G2<$Y$13),-$Y$19/100,IF(AND(F2>=$Y$16,IFERROR(P2>=$Y$17*Q2,FALSE()),'
+    'G2<-$Y$2,G2>=-$Y$18),"Hold - high LY, outside window",IF(AND(G2<-$Y$2,J2>1),'
+    '"⚠ Mixed – review",IF(G2<-$Y$2,-IF(I2>2.5,20,IF(I2>1.5,10,5))/100,'
+    'IF(AND(J2>1,G2<=$Y$2,P2<=Q2),"Hold - within booking window",'
+    'IF(OR(G2>$Y$2,J2>1),IF(MAX(I2,J2)>IF(F2>=$Y$14,$Y$15,2.5),20,'
     'IF(MAX(I2,J2)>1.5,10,5))/100,"")))))))'
 )
 EXPECTED_SIGNAL_ROW2 = (
-    '=IF(C2=100,"✓ Booked",TRIM(IF(G2>$X$2,"▲ Ahead ","")&IF(G2<-$X$2,"▼ Behind ","")&'
-    'IF(H2>$X$3,"⚡ Spike ","")))'
+    '=IF(C2=100,"✓ Booked",TRIM(IF(G2>$Y$2,"▲ Ahead ","")&IF(G2<-$Y$2,"▼ Behind ","")&'
+    'IF(H2>$Y$3,"⚡ Spike ","")))'
 )
 EXPECTED_SUGGESTED_NOTE_ROW2 = (
-    '=IF(AND(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),$X$12,$X$11),'
-    'G2<$X$13),"9/11 - LY below "&IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),'
-    '$X$12,$X$11)&"%",IF(G2<-$X$2,"9/11 - Pacing behind by "&TEXT(G2,"0.00")&"%",'
-    'IF(G2>$X$2,"9/11 - Pacing ahead by "&TEXT(G2,"0.00")&"%",'
+    '=IF(AND(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),$Y$12,$Y$11),'
+    'G2<$Y$13),"9/11 - LY below "&IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),'
+    '$Y$12,$Y$11)&"%",IF(G2<-$Y$2,"9/11 - Pacing behind by "&TEXT(G2,"0.00")&"%",'
+    'IF(G2>$Y$2,"9/11 - Pacing ahead by "&TEXT(G2,"0.00")&"%",'
     'IF(J2>1,"9/11 - Pickup demand spike",""))))'
 )
 EXPECTED_DAYS_OUT_ROW2 = "=A2-TODAY()"
@@ -77,8 +77,8 @@ class ReviewBucketPriorityTest(unittest.TestCase):
 
     def test_high_ly_uses_weekday_weekend_specific_cells(self):
         result = _review_bucket_formula(2)
-        self.assertIn("$X$6", result)
-        self.assertIn("$X$9", result)
+        self.assertIn("$Y$6", result)
+        self.assertIn("$Y$9", result)
 
     def test_short_circuits_when_fully_booked(self):
         self.assertTrue(_review_bucket_formula(2).startswith('=IF(C2=100,"✓ Booked",'))
@@ -86,7 +86,7 @@ class ReviewBucketPriorityTest(unittest.TestCase):
 
 class StaleNoteConditionTest(unittest.TestCase):
     def test_reads_the_configured_threshold_cell(self):
-        self.assertIn("$X$10", _stale_note_condition(2))
+        self.assertIn("$Y$10", _stale_note_condition(2))
 
     def test_parses_notes_own_leading_date_not_a_separate_field(self):
         result = _stale_note_condition(2)
@@ -170,25 +170,25 @@ class LowLyCutTest(unittest.TestCase):
         self.assertIn(condition, _suggested_note_formula(2, "9/11"))
 
     def test_bump_references_the_editable_threshold_not_a_hardcoded_percent(self):
-        self.assertIn("-$X$19/100", _suggested_bump_formula(2))
+        self.assertIn("-$Y$19/100", _suggested_bump_formula(2))
         self.assertNotIn('"-10%"', _suggested_bump_formula(2))
 
     def test_note_names_the_applicable_day_type_threshold(self):
         note = _suggested_note_formula(2, "9/13")
         self.assertIn('"9/13 - LY below "&IF(', note)
-        self.assertIn("$X$12,$X$11", note)
+        self.assertIn("$Y$12,$Y$11", note)
 
     def test_threshold_block_includes_low_ly_cut_percent(self):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
         ws = wb["Daily Pacing"]
-        self.assertEqual(ws["W19"].value, "Low-LY cut amount")
-        self.assertEqual(ws["X19"].value, config.THRESHOLDS["low_ly_cut_percent"])
+        self.assertEqual(ws["X19"].value, "Low-LY cut amount")
+        self.assertEqual(ws["Y19"].value, config.THRESHOLDS["low_ly_cut_percent"])
 
     def test_threshold_block_includes_note_stale_after_days(self):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
         ws = wb["Daily Pacing"]
-        self.assertEqual(ws["W10"].value, "Note stale after (days)")
-        self.assertEqual(ws["X10"].value, config.THRESHOLDS["note_stale_after_days"])
+        self.assertEqual(ws["X10"].value, "Note stale after (days)")
+        self.assertEqual(ws["Y10"].value, config.THRESHOLDS["note_stale_after_days"])
 
 
 def _sample_record(d, **overrides):
@@ -219,6 +219,16 @@ class BuildWorkbookTest(unittest.TestCase):
         self.assertEqual(ws["T1"].value, "New Since Last Review")
         self.assertEqual(ws["U1"].value, "Review Bucket")
         self.assertEqual(ws["V1"].value, "Compset Occupancy %")
+        self.assertEqual(ws["W1"].value, "Live Override (PriceLabs)")
+
+    def test_live_override_is_written_as_a_raw_value_from_the_record(self):
+        # 2026-10-11: this is data_pull.py's own combine_live_overrides()
+        # output (a plain string), not a formula -- nothing to recompute
+        # in Excel, it's already a finished per-date summary.
+        record = _sample_record("2026-09-12", live_override="⚠ differs: Mesquite: -10%, Game Room: none")
+        wb = build_workbook([record], date(2026, 9, 12), {})
+        ws = wb["Daily Pacing"]
+        self.assertEqual(ws["W2"].value, "⚠ differs: Mesquite: -10%, Game Room: none")
 
     def test_compset_occupancy_is_a_vlookup_into_the_compset_data_tab(self):
         # 2026-10-11: the one figure the user wanted pulled onto Daily
@@ -290,9 +300,9 @@ class BuildWorkbookTest(unittest.TestCase):
     def test_threshold_block_matches_config(self):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
         ws = wb["Daily Pacing"]
-        self.assertEqual(ws["X2"].value, config.THRESHOLDS["pace_threshold"])
-        self.assertEqual(ws["X4"].value, config.THRESHOLDS["ly_weekday_severe_below"])
-        self.assertEqual(ws["X18"].value, config.THRESHOLDS["far_out_hold_max_behind_pace"])
+        self.assertEqual(ws["Y2"].value, config.THRESHOLDS["pace_threshold"])
+        self.assertEqual(ws["Y4"].value, config.THRESHOLDS["ly_weekday_severe_below"])
+        self.assertEqual(ws["Y18"].value, config.THRESHOLDS["far_out_hold_max_behind_pace"])
 
     def test_market_occupancy_output_sheet_is_a_paste_target(self):
         # 2026-10-11: replaced the hand-maintained Booking Window sheet --
@@ -342,16 +352,16 @@ class BuildWorkbookTest(unittest.TestCase):
         self.assertEqual(len(weekday_formulas), 4)
         self.assertEqual(len(weekend_formulas), 4)
         for f in weekday_formulas:
-            self.assertTrue(any(f"$X${row}" in f for row in (4, 5, 6, 11)))
+            self.assertTrue(any(f"$Y${row}" in f for row in (4, 5, 6, 11)))
         for f in weekend_formulas:
-            self.assertTrue(any(f"$X${row}" in f for row in (7, 8, 9, 12)))
+            self.assertTrue(any(f"$Y${row}" in f for row in (7, 8, 9, 12)))
         joined = " ".join(formulas)
-        self.assertIn("F2<=$X$4", joined)  # weekday severe
-        self.assertIn("F2<=$X$5", joined)  # weekday below-avg
-        self.assertIn("F2>=$X$6", joined)  # weekday high
-        self.assertIn("F2<=$X$7", joined)  # weekend severe
-        self.assertIn("F2<=$X$8", joined)  # weekend below-avg
-        self.assertIn("F2>=$X$9", joined)  # weekend high
+        self.assertIn("F2<=$Y$4", joined)  # weekday severe
+        self.assertIn("F2<=$Y$5", joined)  # weekday below-avg
+        self.assertIn("F2>=$Y$6", joined)  # weekday high
+        self.assertIn("F2<=$Y$7", joined)  # weekend severe
+        self.assertIn("F2<=$Y$8", joined)  # weekend below-avg
+        self.assertIn("F2>=$Y$9", joined)  # weekend high
 
     def test_review_bucket_short_circuits_when_fully_booked(self):
         result = _review_bucket_formula(2)

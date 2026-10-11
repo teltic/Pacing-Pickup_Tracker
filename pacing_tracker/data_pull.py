@@ -22,6 +22,16 @@ count is ever anything other than len(config.LISTINGS). Fixing the
 template's own Listings filter in PriceLabs (Portfolio Analytics > Report
 Builder) is still the real fix; this is the guard that catches it if that
 filter ever gets reset or widened.
+
+2026-10-11: also pulls each date's CURRENTLY LIVE override on PriceLabs
+(fetch_live_overrides/combine_live_overrides), via the same
+get_listing_date_overrides endpoint push.py already reads before every
+push (confirmed live multiple times). This is a plain per-date/per-
+listing read, not a weighted multi-category blend -- the thing that made
+Mkt Occ/pickup unreliable doesn't apply here, so this stays an API pull
+rather than another manual paste. Best-effort: a failure here leaves the
+column blank rather than blocking the pull, since nothing else on the
+sheet depends on it.
 """
 
 import argparse
@@ -141,6 +151,73 @@ def _warn_on_unexpected_listings(client):
         )
 
 
+def fetch_live_overrides(client, listings, start_date, end_date):
+    """{listing_name: {date_str: {"price", "reason"}}} -- each listing's
+    CURRENTLY LIVE override on PriceLabs right now, straight from
+    get_listing_date_overrides (the same endpoint push.py already reads
+    before every push, confirmed live multiple times -- a plain per-
+    date/per-listing read, not a weighted multi-category blend, so unlike
+    Mkt Occ/pickup this one's reliable enough to keep pulling via API).
+    This is "what's actually set on PriceLabs," separate from Override
+    Request/Notes (what the user is proposing to push next).
+    """
+    by_listing = {}
+    for listing in listings:
+        resp = client.get_listing_date_overrides(
+            listing["listing_id"], listing["pms"], start_date=start_date, end_date=end_date
+        )
+        payload = resp.get("data", resp)
+        overrides = payload.get("overrides", []) if isinstance(payload, dict) else payload
+        by_date = {}
+        for row in overrides or []:
+            row_date = row.get("date")
+            if row_date:
+                by_date[row_date] = {"price": row.get("price"), "reason": row.get("reason")}
+        by_listing[listing["name"]] = by_date
+    return by_listing
+
+
+def combine_live_overrides(by_listing, date_str):
+    """Collapses every listing's live override for one date into a single
+    display string. The user pushes the same override to both listings,
+    so they should normally agree -- if either listing is missing one the
+    other has, or their price/reason don't match exactly, that's drift
+    (e.g. someone changed one directly in the PriceLabs dashboard) worth
+    surfacing rather than silently picking one listing's view.
+    """
+    present = {name: by_date.get(date_str) for name, by_date in by_listing.items()}
+    if all(v is None for v in present.values()):
+        return ""
+
+    def _label(entry):
+        if entry is None:
+            return "none"
+        label = f"{entry['price']}%"
+        if entry.get("reason"):
+            label += f" — {entry['reason']}"
+        return label
+
+    unique = {(v["price"], v.get("reason") or "") for v in present.values() if v is not None}
+    if len(unique) == 1 and all(v is not None for v in present.values()):
+        return _label(next(iter(present.values())))
+
+    return "⚠ differs: " + ", ".join(f"{name}: {_label(entry)}" for name, entry in present.items())
+
+
+def _fetch_live_overrides_column(client, start, end):
+    """Best-effort: a column that fails to populate is a minor annoyance,
+    not a reason to block the whole pull -- unlike _check_listing_count's
+    guard, nothing else on the sheet depends on this.
+    """
+    try:
+        by_listing = fetch_live_overrides(client, config.LISTINGS, start.isoformat(), end.isoformat())
+    except Exception as exc:
+        logger.warning("Could not fetch current live overrides from PriceLabs -- leaving that column blank. Error: %s", exc)
+        return {}
+    dates = {d for by_date in by_listing.values() for d in by_date}
+    return {date_str: combine_live_overrides(by_listing, date_str) for date_str in dates}
+
+
 def _parse_row(row):
     # Pass PriceLabs' own Weekday string through as-is (e.g. "05.Fri") rather
     # than deriving our own -- matches the reference workbook, and the Excel
@@ -182,7 +259,13 @@ def run_pull(client, pull_date=None, forecast_days=None, template_name=None):
             end,
         )
 
-    records = [rb_by_date[date_str] for date_str in sorted(rb_by_date)]
+    live_overrides_by_date = _fetch_live_overrides_column(client, start, end)
+
+    records = []
+    for date_str in sorted(rb_by_date):
+        record = dict(rb_by_date[date_str])
+        record["live_override"] = live_overrides_by_date.get(date_str, "")
+        records.append(record)
     return records
 
 

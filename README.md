@@ -235,6 +235,21 @@ A few things worth knowing about how it works:
   a seasonal proxy, since a future date's own month-year hasn't happened
   yet to look up directly. Carried forward on every regenerate like the
   other paste tabs.
+- **2026-10-11: "Live Override (PriceLabs)" (column W)** shows what's
+  actually set on PriceLabs *right now* for each date — separate from
+  Override Request/Notes (M/N), which are what you're proposing to push
+  *next*. Unlike Mkt Occ/pickup, this one's still pulled live via the API
+  (`data_pull.fetch_live_overrides`/`combine_live_overrides`) — it's a
+  plain per-date, per-listing read (`get_listing_date_overrides`, the
+  same endpoint `push.py` already uses before every push, confirmed live
+  repeatedly), not a weighted multi-category blend, so the reliability
+  problem that sank Mkt Occ/pickup doesn't apply here. Since the same
+  override gets pushed to both listings, the two should normally agree;
+  if they don't (e.g. someone changed one directly in the PriceLabs
+  dashboard), the cell shows `⚠ differs: Mesquite: ..., Game Room: ...`
+  instead of silently picking one listing's view. A raw written value
+  (data_pull.py's own output), not a formula — there's nothing left for
+  Excel to compute.
 
 Run it:
 
@@ -423,11 +438,13 @@ above for the manual-paste design that replaced it.
 Listings and thresholds live in `pacing_tracker/config.py` as plain data
 (the median-booking-window reference table was retired 2026-10-11 — see
 above) — no thresholds are hardcoded into the pacing/signal/bump logic;
-they're all cell references (`$X$2` etc. — shifted twice: `$AA$` →
-`$W$` on 2026-10-07 when Pickup 3d/14d/30d/60d were dropped, then `$W$`
-→ `$X$` on 2026-10-11 when Compset Occupancy % was added as a new data
-column) into the threshold block `excel_report.py` writes onto the Daily
-Pacing sheet itself, editable there without touching any formula.
+they're all cell references (`$Y$2` etc. — shifted three times as new
+data columns were added at the end of the row: `$AA$` → `$W$` on
+2026-10-07 when Pickup 3d/14d/30d/60d were dropped, then `$W$` → `$X$`
+and `$X$` → `$Y$` on 2026-10-11 when Compset Occupancy % and Live
+Override were each added) into the threshold block `excel_report.py`
+writes onto the Daily Pacing sheet itself, editable there without
+touching any formula.
 
 `LISTINGS` is used by `data_pull.py`'s Report Builder guards
 (`_check_listing_count`/`_warn_on_unexpected_listings`) — each entry's
