@@ -135,6 +135,16 @@ calendar's current shape (7 comp listings + "Your Listing", columns B:Y)
 — `excel_report.COMPSET_CAL_PRICE_COLS`/`COMPSET_CAL_AVAILABLE_COLS` are
 the only thing that needs editing if PriceLabs' comp-set size changes.
 
+**2026-10-11: Compset Occupancy % is also pulled onto Daily Pacing
+itself** (column V, a `VLOOKUP` by date into this tab's column B) — the
+one figure from this tab the user wanted on his daily working row, not
+tucked away on a separate tab. Deliberately **current occupancy only, no
+LY/STLY** (none exists for the comp set — see "Compset Cal is forward-
+only" above); the point is a quick read of whether his comp set (geared
+toward his large-group/pool listings) is heavily booked on a given date,
+which he reads as a possible signal to push price, not a pacing
+comparison against last year.
+
 ### Trust guards that remain
 
 - `_check_listing_count()` still hard-fails the pull if Report Builder's
@@ -413,10 +423,11 @@ above for the manual-paste design that replaced it.
 Listings and thresholds live in `pacing_tracker/config.py` as plain data
 (the median-booking-window reference table was retired 2026-10-11 — see
 above) — no thresholds are hardcoded into the pacing/signal/bump logic;
-they're all cell references
-(`$W$2` etc., 2026-10-07 — shifted from `$AA$` when Pickup 3d/14d/30d/60d
-were dropped) into the threshold block `excel_report.py` writes onto the
-Daily Pacing sheet itself, editable there without touching any formula.
+they're all cell references (`$X$2` etc. — shifted twice: `$AA$` →
+`$W$` on 2026-10-07 when Pickup 3d/14d/30d/60d were dropped, then `$W$`
+→ `$X$` on 2026-10-11 when Compset Occupancy % was added as a new data
+column) into the threshold block `excel_report.py` writes onto the Daily
+Pacing sheet itself, editable there without touching any formula.
 
 `LISTINGS` is used by `data_pull.py`'s Report Builder guards
 (`_check_listing_count`/`_warn_on_unexpected_listings`) — each entry's

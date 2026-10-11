@@ -149,7 +149,7 @@ HEADERS = [
     "Pace vs STLY", "Pickup 7d", "Pace (x Threshold)", "Pickup (x Threshold)",
     "Suggested Bump", "Signal", "Override Request", "Notes", "Suggested Note", "Days Out",
     "Median Booking Window (mo)", "Events", "Override Status", "New Since Last Review",
-    "Review Bucket",
+    "Review Bucket", "Compset Occupancy %",
 ]
 # 1-based column letters for the fields above, by name -- avoids magic
 # column letters scattered through the formula-building code below.
@@ -159,9 +159,9 @@ COL = {
     "pickup_ratio": "J", "suggested_bump": "K", "signal": "L", "override_request": "M",
     "notes": "N", "suggested_note": "O", "days_out": "P", "median_booking_window": "Q",
     "events": "R", "override_status": "S", "new_since_last_review": "T",
-    "review_bucket": "U",
+    "review_bucket": "U", "compset_occupancy": "V",
 }
-LAST_DATA_COL = "U"
+LAST_DATA_COL = "V"
 
 PCT_FORMAT = "0.00\\%"
 DATE_FORMAT = "yyyy\\-mm\\-dd"
@@ -200,7 +200,7 @@ THRESHOLD_ROWS = [
     (19, "Low-LY cut amount", "low_ly_cut_percent"),
 ]
 THRESHOLD_HEADER_ROW = 1
-THRESHOLD_LABEL_COL, THRESHOLD_VALUE_COL = "V", "W"
+THRESHOLD_LABEL_COL, THRESHOLD_VALUE_COL = "W", "X"
 
 FILL = {
     "fully_booked": "FFBFBFBF",
@@ -231,7 +231,7 @@ def _low_ly_condition(r):
     """
     ly, pace, weekday = f"{COL['mkt_occ_ly']}{r}", f"{COL['pace_vs_stly']}{r}", f"{COL['weekday']}{r}"
     weekend = _weekend_fragment(weekday)
-    return f"AND({ly}<IF({weekend},$W$12,$W$11),{pace}<$W$13)"
+    return f"AND({ly}<IF({weekend},$X$12,$X$11),{pace}<$X$13)"
 
 
 def _suggested_bump_formula(r):
@@ -240,15 +240,15 @@ def _suggested_bump_formula(r):
         "pace_ratio", "pickup_ratio",
     ))
     occ = f"{COL['occupancy']}{r}"
-    level7 = f'IF(OR({g}>$W$2,{n}>1),IF(MAX({m},{n})>IF({f}>=$W$14,$W$15,2.5),20,IF(MAX({m},{n})>1.5,10,5))/100,"")'
-    level6 = f'IF(AND({n}>1,{g}<=$W$2,{t}<={u}),"Hold - within booking window",{level7})'
-    level5 = f'IF({g}<-$W$2,-IF({m}>2.5,20,IF({m}>1.5,10,5))/100,{level6})'
-    level4 = f'IF(AND({g}<-$W$2,{n}>1),"⚠ Mixed – review",{level5})'
+    level7 = f'IF(OR({g}>$X$2,{n}>1),IF(MAX({m},{n})>IF({f}>=$X$14,$X$15,2.5),20,IF(MAX({m},{n})>1.5,10,5))/100,"")'
+    level6 = f'IF(AND({n}>1,{g}<=$X$2,{t}<={u}),"Hold - within booking window",{level7})'
+    level5 = f'IF({g}<-$X$2,-IF({m}>2.5,20,IF({m}>1.5,10,5))/100,{level6})'
+    level4 = f'IF(AND({g}<-$X$2,{n}>1),"⚠ Mixed – review",{level5})'
     level3 = (
-        f'IF(AND({f}>=$W$16,IFERROR({t}>=$W$17*{u},FALSE()),{g}<-$W$2,{g}>=-$W$18),'
+        f'IF(AND({f}>=$X$16,IFERROR({t}>=$X$17*{u},FALSE()),{g}<-$X$2,{g}>=-$X$18),'
         f'"Hold - high LY, outside window",{level4})'
     )
-    level2 = f'IF({_low_ly_condition(r)},-$W$19/100,{level3})'
+    level2 = f'IF({_low_ly_condition(r)},-$X$19/100,{level3})'
     return f'=IF({occ}=100,"",{level2})'
 
 
@@ -257,20 +257,20 @@ def _signal_formula(r):
     occ = f"{COL['occupancy']}{r}"
     return (
         f'=IF({occ}=100,"✓ Booked",TRIM('
-        f'IF({g}>$W$2,"▲ Ahead ","")&'
-        f'IF({g}<-$W$2,"▼ Behind ","")&'
-        f'IF({h}>$W$3,"⚡ Spike ","")'
+        f'IF({g}>$X$2,"▲ Ahead ","")&'
+        f'IF({g}<-$X$2,"▼ Behind ","")&'
+        f'IF({h}>$X$3,"⚡ Spike ","")'
         f"))"
     )
 
 
 def _suggested_note_formula(r, note_prefix):
     g, n, weekday = f"{COL['pace_vs_stly']}{r}", f"{COL['pickup_ratio']}{r}", f"{COL['weekday']}{r}"
-    applicable_ly_threshold = f"IF({_weekend_fragment(weekday)},$W$12,$W$11)"
+    applicable_ly_threshold = f"IF({_weekend_fragment(weekday)},$X$12,$X$11)"
     return (
         f'=IF({_low_ly_condition(r)},"{note_prefix} - LY below "&{applicable_ly_threshold}&"%",'
-        f'IF({g}<-$W$2,"{note_prefix} - Pacing behind by "&TEXT({g},"0.00")&"%",'
-        f'IF({g}>$W$2,"{note_prefix} - Pacing ahead by "&TEXT({g},"0.00")&"%",'
+        f'IF({g}<-$X$2,"{note_prefix} - Pacing behind by "&TEXT({g},"0.00")&"%",'
+        f'IF({g}>$X$2,"{note_prefix} - Pacing ahead by "&TEXT({g},"0.00")&"%",'
         f'IF({n}>1,"{note_prefix} - Pickup demand spike",""))))'
     )
 
@@ -321,7 +321,7 @@ def _new_since_last_review_formula(r, previous_signal):
 
 def _stale_note_condition(r):
     """True when Notes' own leading "M/D - ..." date (the convention the
-    user's notes and Suggested Note already both use) is $W$10+ days old.
+    user's notes and Suggested Note already both use) is $X$10+ days old.
     Picks whichever of this year's or last year's M/D isn't in the future,
     so a note from December still ages correctly when reviewed in January.
     A note that doesn't start with that exact pattern (blank, freeform
@@ -336,7 +336,7 @@ def _stale_note_condition(r):
     note_day = f"VALUE(MID({prefix},{slash}+1,LEN({prefix})-{slash}))"
     this_year_date = f"DATE(YEAR(TODAY()),{note_month},{note_day})"
     note_date = f"IF({this_year_date}>TODAY(),DATE(YEAR(TODAY())-1,{note_month},{note_day}),{this_year_date})"
-    return f"IFERROR(TODAY()-{note_date}>=$W$10,FALSE())"
+    return f"IFERROR(TODAY()-{note_date}>=$X$10,FALSE())"
 
 
 def _review_bucket_formula(r):
@@ -352,14 +352,14 @@ def _review_bucket_formula(r):
     m, n = f"{COL['pace_ratio']}{r}", f"{COL['pickup_ratio']}{r}"
     t, u = f"{COL['days_out']}{r}", f"{COL['median_booking_window']}{r}"
     weekend = _weekend_fragment(weekday)
-    low_ly = f"{f}<IF({weekend},$W$12,$W$11)"
-    high_ly = f"IF({weekend},{f}>=$W$9,{f}>=$W$6)"
+    low_ly = f"{f}<IF({weekend},$X$12,$X$11)"
+    high_ly = f"IF({weekend},{f}>=$X$9,{f}>=$X$6)"
     stale_note = _stale_note_condition(r)
     return (
         f'=IF({occ}=100,"✓ Booked",'
         f'IF({x}="NEW","1. New",'
         f'IF({w}="Review - pace normalized","2. Override Normalized",'
-        f'IF({stale_note},"2. Stale Note ("&$W$10&"+d)",'
+        f'IF({stale_note},"2. Stale Note ("&$X$10&"+d)",'
         f'IF({low_ly},"3. Low LY",'
         f'IF({high_ly},"3. High LY",'
         f'IF({m}>2,"4. Pace >10%",'
@@ -380,6 +380,18 @@ def _mkt_occ_vlookup(r, column_key, date_col="A"):
     col_idx = MKT_OCC_COL[column_key]
     col_letter = chr(ord("A") + col_idx - 1)
     return f"=IFERROR(VLOOKUP(${date_col}{r},'{MKT_OCC_SHEET_NAME}'!$A:${col_letter},{col_idx},FALSE()),\"\")"
+
+
+def _compset_occupancy_vlookup(r):
+    """2026-10-11: the one number the user wants pulled onto Daily Pacing
+    itself from the comp-set calendar -- their comp set's own CURRENT
+    occupancy (no LY/STLY; the user confirmed Compset Cal has none by
+    design), as a quick visual read of whether the comp set (geared
+    toward his large-group/pool listings) is heavily booked on a given
+    date -- a possible signal to push price. Reads the already-blended
+    figure on the Compset Data tab rather than re-deriving it here.
+    """
+    return f"=IFERROR(VLOOKUP(${COL['date']}{r},'{COMPSET_DATA_SHEET_NAME}'!$A:$B,2,FALSE()),\"\")"
 
 
 def _write_header(ws):
@@ -407,8 +419,8 @@ def _write_data_rows(ws, records, pull_date, previous_state):
         ws[f"{COL['mkt_occ_ly']}{r}"] = _mkt_occ_vlookup(r, "market_occ_ly")
         ws[f"{COL['pace_vs_stly']}{r}"] = f"={COL['mkt_occ']}{r}-{COL['mkt_occ_stly']}{r}"
         ws[f"{COL['pickup_7d']}{r}"] = _mkt_occ_vlookup(r, "pickup_7d")
-        ws[f"{COL['pace_ratio']}{r}"] = f"=IFERROR(ABS({COL['pace_vs_stly']}{r})/$W$2,0)"
-        ws[f"{COL['pickup_ratio']}{r}"] = f"=IFERROR({COL['pickup_7d']}{r}/$W$3,0)"
+        ws[f"{COL['pace_ratio']}{r}"] = f"=IFERROR(ABS({COL['pace_vs_stly']}{r})/$X$2,0)"
+        ws[f"{COL['pickup_ratio']}{r}"] = f"=IFERROR({COL['pickup_7d']}{r}/$X$3,0)"
         ws[f"{COL['suggested_bump']}{r}"] = _suggested_bump_formula(r)
         ws[f"{COL['suggested_bump']}{r}"].number_format = SUGGESTED_BUMP_FORMAT
         ws[f"{COL['signal']}{r}"] = _signal_formula(r)
@@ -422,8 +434,12 @@ def _write_data_rows(ws, records, pull_date, previous_state):
         ws[f"{COL['override_status']}{r}"] = _override_status_formula(r)
         ws[f"{COL['new_since_last_review']}{r}"] = _new_since_last_review_formula(r, prev.get("signal"))
         ws[f"{COL['review_bucket']}{r}"] = _review_bucket_formula(r)
+        ws[f"{COL['compset_occupancy']}{r}"] = _compset_occupancy_vlookup(r)
 
-        for col_name in ("occupancy", "mkt_occ", "mkt_occ_stly", "mkt_occ_ly", "pace_vs_stly", "pickup_7d"):
+        for col_name in (
+            "occupancy", "mkt_occ", "mkt_occ_stly", "mkt_occ_ly", "pace_vs_stly", "pickup_7d",
+            "compset_occupancy",
+        ):
             ws[f"{COL[col_name]}{r}"].number_format = PCT_FORMAT
         for col_name in ("pace_ratio", "pickup_ratio"):
             ws[f"{COL[col_name]}{r}"].number_format = "0.0"
@@ -603,11 +619,11 @@ def _apply_conditional_formatting(ws, last_row):
     ws.conditional_formatting.add(f"M2:M{last_row}", FormulaRule(formula=["LEN(M2)>0"], fill=fmt("light_orange")))
 
     g_range = f"G2:G{last_row}"
-    ws.conditional_formatting.add(g_range, FormulaRule(formula=["G2<-2*$W$2"], fill=fmt("dark_red")))
-    ws.conditional_formatting.add(g_range, FormulaRule(formula=["AND(G2>=-2*$W$2,G2<-$W$2)"], fill=fmt("orange")))
-    ws.conditional_formatting.add(g_range, FormulaRule(formula=["AND(G2>=-$W$2,G2<=$W$2)"], fill=fmt("pale_yellow")))
-    ws.conditional_formatting.add(g_range, FormulaRule(formula=["AND(G2>$W$2,G2<=2*$W$2)"], fill=fmt("light_green")))
-    ws.conditional_formatting.add(g_range, FormulaRule(formula=["G2>2*$W$2"], fill=fmt("dark_green")))
+    ws.conditional_formatting.add(g_range, FormulaRule(formula=["G2<-2*$X$2"], fill=fmt("dark_red")))
+    ws.conditional_formatting.add(g_range, FormulaRule(formula=["AND(G2>=-2*$X$2,G2<-$X$2)"], fill=fmt("orange")))
+    ws.conditional_formatting.add(g_range, FormulaRule(formula=["AND(G2>=-$X$2,G2<=$X$2)"], fill=fmt("pale_yellow")))
+    ws.conditional_formatting.add(g_range, FormulaRule(formula=["AND(G2>$X$2,G2<=2*$X$2)"], fill=fmt("light_green")))
+    ws.conditional_formatting.add(g_range, FormulaRule(formula=["G2>2*$X$2"], fill=fmt("dark_green")))
 
     # Mkt Occ % LY (F) is banded weekday vs weekend separately -- see the
     # THRESHOLDS comment in config.py for why a flat threshold doesn't work
@@ -618,28 +634,28 @@ def _apply_conditional_formatting(ws, last_row):
     not_weekend = f"NOT({_weekend_fragment('B2')})"
     is_weekend = _weekend_fragment("B2")
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({not_weekend},F2<=$W$4)"], fill=fmt("dark_red"))
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2<=$X$4)"], fill=fmt("dark_red"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>$W$4,F2<=$W$11)"], fill=fmt("orange"))
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>$X$4,F2<=$X$11)"], fill=fmt("orange"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>$W$11,F2<=$W$5)"], fill=fmt("light_gold"))
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>$X$11,F2<=$X$5)"], fill=fmt("light_gold"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>=$W$6)"], fill=fmt("med_green"))
+        f_range, FormulaRule(formula=[f"AND({not_weekend},F2>=$X$6)"], fill=fmt("med_green"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({is_weekend},F2<=$W$7)"], fill=fmt("dark_red"))
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2<=$X$7)"], fill=fmt("dark_red"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>$W$7,F2<=$W$12)"], fill=fmt("orange"))
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>$X$7,F2<=$X$12)"], fill=fmt("orange"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>$W$12,F2<=$W$8)"], fill=fmt("light_gold"))
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>$X$12,F2<=$X$8)"], fill=fmt("light_gold"))
     )
     ws.conditional_formatting.add(
-        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>=$W$9)"], fill=fmt("med_green"))
+        f_range, FormulaRule(formula=[f"AND({is_weekend},F2>=$X$9)"], fill=fmt("med_green"))
     )
 
     op_range = f"K2:L{last_row}"
@@ -661,7 +677,7 @@ def _apply_conditional_formatting(ws, last_row):
         f"H2:H{last_row}",
         ColorScaleRule(
             start_type="min", start_color="FFFFFFFF",
-            mid_type="formula", mid_value="$W$3", mid_color="FFE2EFDA",
+            mid_type="formula", mid_value="$X$3", mid_color="FFE2EFDA",
             end_type="max", end_color="FF375623",
         ),
     )
@@ -671,7 +687,7 @@ def _set_column_widths(ws):
     widths = {
         "A": 11, "B": 8, "C": 9, "E": 11, "F": 9, "G": 10, "H": 9,
         "I": 12, "J": 13, "K": 15, "L": 18, "M": 20, "N": 34, "O": 24,
-        "P": 8, "Q": 15, "R": 16, "S": 22, "T": 12, "U": 20,
+        "P": 8, "Q": 15, "R": 16, "S": 22, "T": 12, "U": 20, "V": 20,
     }
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
