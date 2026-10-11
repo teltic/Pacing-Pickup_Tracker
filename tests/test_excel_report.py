@@ -5,6 +5,7 @@ from pacing_tracker import config
 from pacing_tracker.excel_report import (
     COMPSET_CAL_SHEET_NAME,
     COMPSET_DATA_SHEET_NAME,
+    MARKET_OCCUPANCY_OUTPUT_SHEET_NAME,
     MKT_OCC_SHEET_NAME,
     SUGGESTED_BUMP_FORMAT,
     _days_out_formula,
@@ -48,7 +49,10 @@ EXPECTED_SUGGESTED_NOTE_ROW2 = (
     'IF(J2>1,"9/11 - Pickup demand spike",""))))'
 )
 EXPECTED_DAYS_OUT_ROW2 = "=A2-TODAY()"
-EXPECTED_MEDIAN_BOOKING_WINDOW_ROW2 = "=IFERROR(VLOOKUP(MONTH(A2),'Booking Window'!A:C,3,FALSE()),\"\")"
+EXPECTED_MEDIAN_BOOKING_WINDOW_ROW2 = (
+    "=IFERROR(LOOKUP(2,1/(MONTH('Market Occupancy Output'!$A$2:$A$1000)=MONTH(A2)),"
+    "'Market Occupancy Output'!$B$2:$B$1000),\"\")"
+)
 EXPECTED_OVERRIDE_STATUS_ROW2 = (
     '=IF(ISBLANK(M2),"",IF(AND(IF(ISNUMBER(M2),M2<0,LEFT(M2,1)="-")=FALSE(),'
     'NOT(OR(ISNUMBER(SEARCH("Ahead",L2)),ISNUMBER(SEARCH("Spike",L2))))),'
@@ -275,12 +279,13 @@ class BuildWorkbookTest(unittest.TestCase):
         self.assertEqual(ws["W4"].value, config.THRESHOLDS["ly_weekday_severe_below"])
         self.assertEqual(ws["W18"].value, config.THRESHOLDS["far_out_hold_max_behind_pace"])
 
-    def test_booking_window_sheet_matches_config(self):
+    def test_market_occupancy_output_sheet_is_a_paste_target(self):
+        # 2026-10-11: replaced the hand-maintained Booking Window sheet --
+        # Median Booking Window now reads a real PriceLabs export instead.
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
-        ws = wb["Booking Window"]
-        self.assertEqual(ws["A2"].value, 1)
-        self.assertEqual(ws["B2"].value, "Jan")
-        self.assertEqual(ws["C2"].value, config.MEDIAN_BOOKING_WINDOW_BY_MONTH[1])
+        self.assertIn(MARKET_OCCUPANCY_OUTPUT_SHEET_NAME, wb.sheetnames)
+        self.assertIsNone(wb[MARKET_OCCUPANCY_OUTPUT_SHEET_NAME]["A2"].value)
+        self.assertNotIn("Booking Window", wb.sheetnames)
 
     def test_how_to_use_sheet_explains_the_paste_workflow(self):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})

@@ -98,12 +98,25 @@ from . import config
 from .carryforward import copy_pasted_sheets, load_previous_state_for_folder
 
 SHEET_NAME = "Daily Pacing"
-BOOKING_WINDOW_SHEET_NAME = "Booking Window"
 DAILY_REVIEW_STEPS_SHEET_NAME = "Daily Review Steps"
 HOW_TO_USE_SHEET_NAME = "How To Use"
 MKT_OCC_SHEET_NAME = "Neighborhood Data - Mkt Occ"
 COMPSET_CAL_SHEET_NAME = "Neighborhood Data - Compset Cal"
 COMPSET_DATA_SHEET_NAME = "Compset Data"
+MARKET_OCCUPANCY_OUTPUT_SHEET_NAME = "Market Occupancy Output"
+
+# Row/column layout of a "Market Occupancy Output" paste (a PriceLabs
+# performance-by-month export: Period, Median Booking Window, Median
+# Booked Length of Stay, ADR, Occupancy) -- 2026-10-11, replaced the old
+# hand-maintained MEDIAN_BOOKING_WINDOW_BY_MONTH table/"Booking Window"
+# sheet. One row per actual month-year on file (e.g. Oct 2024, Nov 2024,
+# ...), not one row per calendar month number, so looking up a future
+# date's median booking window means finding the *most recent* year on
+# file for that calendar month (a seasonal proxy, same spirit as the old
+# table -- the actual future month hasn't happened yet to look up
+# directly).
+MARKET_OCCUPANCY_OUTPUT_COL = {"period": 1, "median_booking_window": 2}
+MARKET_OCCUPANCY_OUTPUT_MAX_ROW = 1000
 
 # Row/column layout of a PriceLabs "Mkt Occ" dashboard export, exactly as
 # pasted (see this module's docstring) -- Daily Pacing's VLOOKUP formulas
@@ -267,8 +280,23 @@ def _days_out_formula(r):
 
 
 def _median_booking_window_formula(r):
+    """Most recent year on file in the "Market Occupancy Output" tab for
+    the target date's calendar month -- a seasonal proxy, since a future
+    date's own month-year hasn't happened yet to look up directly.
+    LOOKUP(2,1/(condition),range) is the standard Excel idiom for "last
+    matching row in a range" (1/TRUE=1, 1/FALSE=#DIV/0!, and LOOKUP
+    finds the last non-error entry <= 2) -- relies on the pasted data
+    being in chronological order, which a dashboard export always is.
+    """
     a = f"{COL['date']}{r}"
-    return f"=IFERROR(VLOOKUP(MONTH({a}),'{BOOKING_WINDOW_SHEET_NAME}'!A:C,3,FALSE()),\"\")"
+    period_col = chr(ord("A") + MARKET_OCCUPANCY_OUTPUT_COL["period"] - 1)
+    value_col = chr(ord("A") + MARKET_OCCUPANCY_OUTPUT_COL["median_booking_window"] - 1)
+    sheet = MARKET_OCCUPANCY_OUTPUT_SHEET_NAME
+    last_row = MARKET_OCCUPANCY_OUTPUT_MAX_ROW
+    return (
+        f"=IFERROR(LOOKUP(2,1/(MONTH('{sheet}'!${period_col}$2:${period_col}${last_row})=MONTH({a})),"
+        f"'{sheet}'!${value_col}$2:${value_col}${last_row}),\"\")"
+    )
 
 
 def _override_status_formula(r):
@@ -411,15 +439,6 @@ def _write_thresholds(ws):
         cell = ws[f"{THRESHOLD_VALUE_COL}{row}"]
         cell.value = config.THRESHOLDS[key]
         cell.fill = PatternFill("solid", fgColor="FFFFF2CC")
-
-
-def _write_booking_window_sheet(wb):
-    ws = wb.create_sheet(BOOKING_WINDOW_SHEET_NAME)
-    ws.append(["Month #", "Month", "Median Booking Window"])
-    month_abbrev = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    for month_num in range(1, 13):
-        ws.append([month_num, month_abbrev[month_num - 1], config.MEDIAN_BOOKING_WINDOW_BY_MONTH[month_num]])
-    return ws
 
 
 def _write_daily_review_steps_sheet(wb):
@@ -679,7 +698,6 @@ def build_workbook(records, pull_date, previous_state, previous_path=None):
     last_row = len(records) + 1
     _apply_conditional_formatting(ws, last_row)
 
-    _write_booking_window_sheet(wb)
     _write_daily_review_steps_sheet(wb)
     _write_how_to_use_sheet(wb)
     _write_paste_target_sheet(
@@ -689,6 +707,11 @@ def build_workbook(records, pull_date, previous_state, previous_path=None):
     _write_paste_target_sheet(
         wb, COMPSET_CAL_SHEET_NAME,
         "Paste the PriceLabs comp-set calendar CSV export here, starting at A1 (headers included).",
+    )
+    _write_paste_target_sheet(
+        wb, MARKET_OCCUPANCY_OUTPUT_SHEET_NAME,
+        "Paste the PriceLabs performance-by-month export here, starting at A1 (headers included) -- "
+        "feeds Median Booking Window (Daily Pacing column Q).",
     )
     _write_compset_data_sheet(wb, config.FORECAST_DAYS)
 

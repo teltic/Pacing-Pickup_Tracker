@@ -114,23 +114,14 @@ THRESHOLDS = {
     "note_stale_after_days": 14,
 }
 
-# --- Median booking window by month (spec: re-paste periodically) -----------
-# 1 = January ... 12 = December
-
-MEDIAN_BOOKING_WINDOW_BY_MONTH = {
-    1: 42,
-    2: 40,
-    3: 45,
-    4: 51,
-    5: 43,
-    6: 33,
-    7: 21,
-    8: 15,
-    9: 21,
-    10: 37,
-    11: 53,
-    12: 27,
-}
+# 2026-10-11: the hand-maintained MEDIAN_BOOKING_WINDOW_BY_MONTH table (a
+# "spec: re-paste periodically" guess per calendar month) was retired in
+# favor of the "Market Occupancy Output" paste tab -- a real PriceLabs
+# performance-by-month export (Period/Median Booking Window/Median Booked
+# LOS/ADR/Occupancy). excel_report._median_booking_window_formula() now
+# reads that tab directly (most recent year on file for the target date's
+# calendar month), the same paste-and-formulas pattern as the Neighborhood
+# Data tabs -- see excel_report.py's module docstring.
 
 WEEKEND_DAYS = {"Fri", "Sat"}  # per spec: weekend = Fri-Sat, weekday = Sun-Thu
 

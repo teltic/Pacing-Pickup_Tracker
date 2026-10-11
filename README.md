@@ -208,11 +208,23 @@ A few things worth knowing about how it works:
   Drive API/OAuth. Set via the `PACING_DRIVE_SYNC_FOLDER` env var (or in
   `.env`, same as the API key); defaults to `data/` if unset.
 - The workbook now has **7 sheets**: **Daily Pacing** (the main sheet),
-  **Booking Window**, **Daily Review Steps**, **How To Use** (now plain
-  instructions for the paste workflow, not a Data Source table — there's
-  no more per-pull API data to show), **Neighborhood Data - Mkt Occ** and
-  **Neighborhood Data - Compset Cal** (paste targets, see above), and
-  **Compset Data** (computed comparison, see above).
+  **Daily Review Steps**, **How To Use** (now plain instructions for the
+  paste workflow, not a Data Source table — there's no more per-pull API
+  data to show), **Neighborhood Data - Mkt Occ**, **Neighborhood Data -
+  Compset Cal**, and **Market Occupancy Output** (paste targets, see
+  above and below), and **Compset Data** (computed comparison, see
+  above).
+- **2026-10-11: Median Booking Window (column Q) moved off the old
+  hand-maintained "Booking Window" sheet onto a 4th paste target,
+  "Market Occupancy Output"** — a real PriceLabs performance-by-month
+  export (Period, Median Booking Window, Median Booked Length of Stay,
+  ADR, Occupancy), rather than a table someone has to remember to
+  re-type periodically. The formula finds the *most recent year on file*
+  for the target date's calendar month (`LOOKUP(2,1/(MONTH(range)=MONTH(
+  target)),...)`, the standard Excel idiom for "last matching row") —
+  a seasonal proxy, since a future date's own month-year hasn't happened
+  yet to look up directly. Carried forward on every regenerate like the
+  other paste tabs.
 
 Run it:
 
@@ -398,9 +410,10 @@ above for the manual-paste design that replaced it.
 
 ## Configuration
 
-Listings, thresholds, and the median-booking-window reference table all
-live in `pacing_tracker/config.py` as plain data — no thresholds are
-hardcoded into the pacing/signal/bump logic; they're all cell references
+Listings and thresholds live in `pacing_tracker/config.py` as plain data
+(the median-booking-window reference table was retired 2026-10-11 — see
+above) — no thresholds are hardcoded into the pacing/signal/bump logic;
+they're all cell references
 (`$W$2` etc., 2026-10-07 — shifted from `$AA$` when Pickup 3d/14d/30d/60d
 were dropped) into the threshold block `excel_report.py` writes onto the
 Daily Pacing sheet itself, editable there without touching any formula.

@@ -24,7 +24,11 @@ COL_DATE, COL_SIGNAL, COL_OVERRIDE_REQUEST, COL_NOTES = 0, 11, 12, 13
 # excel_report.py's module docstring) rather than anything this tool
 # computes -- carried forward verbatim on every regenerate so a fresh
 # daily file never wipes out the user's last paste.
-PASTED_SHEET_NAMES = ["Neighborhood Data - Mkt Occ", "Neighborhood Data - Compset Cal"]
+PASTED_SHEET_NAMES = [
+    "Neighborhood Data - Mkt Occ",
+    "Neighborhood Data - Compset Cal",
+    "Market Occupancy Output",
+]
 
 
 def parse_filename_date(filename):
