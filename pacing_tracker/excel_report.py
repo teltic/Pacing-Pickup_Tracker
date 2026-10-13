@@ -146,20 +146,23 @@ COMPSET_CAL_AVAILABLE_COLS = ["C", "F", "I", "L", "O", "R", "U"]
 
 HEADERS = [
     "Date", "Weekday", "Occupancy %", "Mkt Occ %", "Mkt Occ % STLY", "Mkt Occ % LY",
-    "Pace vs STLY", "Pickup 7d", "Pace (x Threshold)", "Pickup (x Threshold)",
-    "Suggested Bump", "Signal", "Override Request", "Notes", "Suggested Note", "Days Out",
-    "Median Booking Window (mo)", "Events", "Override Status", "New Since Last Review",
-    "Review Bucket", "Compset Occupancy %", "Live Override (PriceLabs)",
+    "Pace vs STLY", "Pickup 7d", "Compset Occupancy %", "Pace (x Threshold)",
+    "Pickup (x Threshold)", "Suggested Bump", "Signal", "Override Request", "Notes",
+    "Suggested Note", "Days Out", "Median Booking Window (mo)", "Events", "Override Status",
+    "New Since Last Review", "Review Bucket", "Live Override (PriceLabs)",
 ]
 # 1-based column letters for the fields above, by name -- avoids magic
 # column letters scattered through the formula-building code below.
+# 2026-10-13: Compset Occupancy % moved from the end to right after
+# Pickup 7d (I) -- everything from Pace Ratio through Review Bucket
+# shifted one letter right accordingly.
 COL = {
     "date": "A", "weekday": "B", "occupancy": "C", "mkt_occ": "D", "mkt_occ_stly": "E",
-    "mkt_occ_ly": "F", "pace_vs_stly": "G", "pickup_7d": "H", "pace_ratio": "I",
-    "pickup_ratio": "J", "suggested_bump": "K", "signal": "L", "override_request": "M",
-    "notes": "N", "suggested_note": "O", "days_out": "P", "median_booking_window": "Q",
-    "events": "R", "override_status": "S", "new_since_last_review": "T",
-    "review_bucket": "U", "compset_occupancy": "V", "live_override": "W",
+    "mkt_occ_ly": "F", "pace_vs_stly": "G", "pickup_7d": "H", "compset_occupancy": "I",
+    "pace_ratio": "J", "pickup_ratio": "K", "suggested_bump": "L", "signal": "M",
+    "override_request": "N", "notes": "O", "suggested_note": "P", "days_out": "Q",
+    "median_booking_window": "R", "events": "S", "override_status": "T",
+    "new_since_last_review": "U", "review_bucket": "V", "live_override": "W",
 }
 LAST_DATA_COL = "W"
 
@@ -419,6 +422,7 @@ def _write_data_rows(ws, records, pull_date, previous_state):
         ws[f"{COL['mkt_occ_ly']}{r}"] = _mkt_occ_vlookup(r, "market_occ_ly")
         ws[f"{COL['pace_vs_stly']}{r}"] = f"={COL['mkt_occ']}{r}-{COL['mkt_occ_stly']}{r}"
         ws[f"{COL['pickup_7d']}{r}"] = _mkt_occ_vlookup(r, "pickup_7d")
+        ws[f"{COL['compset_occupancy']}{r}"] = _compset_occupancy_vlookup(r)
         ws[f"{COL['pace_ratio']}{r}"] = f"=IFERROR(ABS({COL['pace_vs_stly']}{r})/$Y$2,0)"
         ws[f"{COL['pickup_ratio']}{r}"] = f"=IFERROR({COL['pickup_7d']}{r}/$Y$3,0)"
         ws[f"{COL['suggested_bump']}{r}"] = _suggested_bump_formula(r)
@@ -434,7 +438,6 @@ def _write_data_rows(ws, records, pull_date, previous_state):
         ws[f"{COL['override_status']}{r}"] = _override_status_formula(r)
         ws[f"{COL['new_since_last_review']}{r}"] = _new_since_last_review_formula(r, prev.get("signal"))
         ws[f"{COL['review_bucket']}{r}"] = _review_bucket_formula(r)
-        ws[f"{COL['compset_occupancy']}{r}"] = _compset_occupancy_vlookup(r)
         ws[f"{COL['live_override']}{r}"] = record.get("live_override")
 
         for col_name in (
@@ -607,17 +610,17 @@ def _apply_conditional_formatting(ws, last_row):
         full_range, FormulaRule(formula=["$A2=TODAY()"], fill=fmt("today"))
     )
 
-    p_range = f"L2:L{last_row}"
-    ws.conditional_formatting.add(p_range, FormulaRule(formula=['ISNUMBER(SEARCH("Behind",L2))'], fill=fmt("salmon")))
-    ws.conditional_formatting.add(p_range, FormulaRule(formula=['ISNUMBER(SEARCH("Ahead",L2))'], fill=fmt("light_green")))
-    ws.conditional_formatting.add(p_range, FormulaRule(formula=['ISNUMBER(SEARCH("Spike",L2))'], fill=fmt("light_gold")))
-    ws.conditional_formatting.add(p_range, FormulaRule(formula=['ISNUMBER(SEARCH("Booked",L2))'], fill=fmt("light_grey")))
+    p_range = f"M2:M{last_row}"
+    ws.conditional_formatting.add(p_range, FormulaRule(formula=['ISNUMBER(SEARCH("Behind",M2))'], fill=fmt("salmon")))
+    ws.conditional_formatting.add(p_range, FormulaRule(formula=['ISNUMBER(SEARCH("Ahead",M2))'], fill=fmt("light_green")))
+    ws.conditional_formatting.add(p_range, FormulaRule(formula=['ISNUMBER(SEARCH("Spike",M2))'], fill=fmt("light_gold")))
+    ws.conditional_formatting.add(p_range, FormulaRule(formula=['ISNUMBER(SEARCH("Booked",M2))'], fill=fmt("light_grey")))
 
-    ws.conditional_formatting.add(f"R2:R{last_row}", FormulaRule(formula=["LEN(R2)>0"], fill=fmt("pale_yellow")))
+    ws.conditional_formatting.add(f"S2:S{last_row}", FormulaRule(formula=["LEN(S2)>0"], fill=fmt("pale_yellow")))
     ws.conditional_formatting.add(
         f"B2:B{last_row}", FormulaRule(formula=['OR(RIGHT(B2,3)="Fri",RIGHT(B2,3)="Sat")'], fill=fmt("light_purple"))
     )
-    ws.conditional_formatting.add(f"M2:M{last_row}", FormulaRule(formula=["LEN(M2)>0"], fill=fmt("light_orange")))
+    ws.conditional_formatting.add(f"N2:N{last_row}", FormulaRule(formula=["LEN(N2)>0"], fill=fmt("light_orange")))
 
     g_range = f"G2:G{last_row}"
     ws.conditional_formatting.add(g_range, FormulaRule(formula=["G2<-2*$Y$2"], fill=fmt("dark_red")))
@@ -659,20 +662,20 @@ def _apply_conditional_formatting(ws, last_row):
         f_range, FormulaRule(formula=[f"AND({is_weekend},F2>=$Y$9)"], fill=fmt("med_green"))
     )
 
-    op_range = f"K2:L{last_row}"
-    ws.conditional_formatting.add(op_range, FormulaRule(formula=['ISNUMBER(SEARCH("Mixed",K2))'], fill=fmt("light_grey")))
-    # K2 holds a real number (not "+20%" text) for its actionable branches
+    op_range = f"L2:M{last_row}"
+    ws.conditional_formatting.add(op_range, FormulaRule(formula=['ISNUMBER(SEARCH("Mixed",L2))'], fill=fmt("light_grey")))
+    # L2 holds a real number (not "+20%" text) for its actionable branches
     # -- see SUGGESTED_BUMP_FORMAT -- so these key off the sign of the
     # number rather than a leading "+"/"-" character. The "Hold - ..."
     # branch is still text (ISNUMBER is FALSE for it), so this also leaves
     # that advisory-only output uncolored here.
-    ws.conditional_formatting.add(op_range, FormulaRule(formula=["AND(ISNUMBER(K2),K2>0)"], fill=fmt("light_green")))
-    ws.conditional_formatting.add(op_range, FormulaRule(formula=["AND(ISNUMBER(K2),K2<0)"], fill=fmt("salmon")))
+    ws.conditional_formatting.add(op_range, FormulaRule(formula=["AND(ISNUMBER(L2),L2>0)"], fill=fmt("light_green")))
+    ws.conditional_formatting.add(op_range, FormulaRule(formula=["AND(ISNUMBER(L2),L2<0)"], fill=fmt("salmon")))
 
-    ws.conditional_formatting.add(f"Q2:Q{last_row}", FormulaRule(formula=["AND(P2>=0,P2<=Q2)"], fill=fmt("med_blue")))
-    ws.conditional_formatting.add(f"S2:S{last_row}", FormulaRule(formula=["LEN(S2)>0"], fill=fmt("light_gold")))
-    ws.conditional_formatting.add(f"T2:T{last_row}", FormulaRule(formula=["LEN(T2)>0"], fill=fmt("light_green")))
-    ws.conditional_formatting.add(f"U2:U{last_row}", FormulaRule(formula=["LEN(U2)>0"], fill=fmt("pale_yellow")))
+    ws.conditional_formatting.add(f"R2:R{last_row}", FormulaRule(formula=["AND(Q2>=0,Q2<=R2)"], fill=fmt("med_blue")))
+    ws.conditional_formatting.add(f"T2:T{last_row}", FormulaRule(formula=["LEN(T2)>0"], fill=fmt("light_gold")))
+    ws.conditional_formatting.add(f"U2:U{last_row}", FormulaRule(formula=["LEN(U2)>0"], fill=fmt("light_green")))
+    ws.conditional_formatting.add(f"V2:V{last_row}", FormulaRule(formula=["LEN(V2)>0"], fill=fmt("pale_yellow")))
 
     # Live Override (W): flags when the two listings' actual live
     # overrides on PriceLabs disagree (combine_live_overrides prefixes
@@ -697,17 +700,17 @@ def _apply_conditional_formatting(ws, last_row):
 
 def _set_column_widths(ws):
     widths = {
-        "A": 11, "B": 8, "C": 9, "E": 11, "F": 9, "G": 10, "H": 9,
-        "I": 12, "J": 13, "K": 15, "L": 18, "M": 20, "N": 34, "O": 24,
-        "P": 8, "Q": 15, "R": 16, "S": 22, "T": 12, "U": 20, "V": 20, "W": 34,
+        "A": 11, "B": 8, "C": 9, "E": 11, "F": 9, "G": 10, "H": 9, "I": 20,
+        "J": 12, "K": 13, "L": 15, "M": 18, "N": 20, "O": 34, "P": 24,
+        "Q": 8, "R": 15, "S": 16, "T": 22, "U": 12, "V": 20, "W": 34,
     }
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
 
-    # Pace/Pickup x Threshold ratios (I:J) are detail that already feeds
+    # Pace/Pickup x Threshold ratios (J:K) are detail that already feeds
     # Signal/Suggested Bump -- grouped and collapsed (not deleted) so
     # they're one click on the outline bar away instead of gone.
-    ws.column_dimensions.group("I", "J", hidden=True)
+    ws.column_dimensions.group("J", "K", hidden=True)
 
 
 def build_workbook(records, pull_date, previous_state, previous_path=None):
@@ -715,9 +718,11 @@ def build_workbook(records, pull_date, previous_state, previous_path=None):
     ws = wb.active
     ws.title = SHEET_NAME
     ws.sheet_view.showGridLines = False
-    # Freezes the header row plus columns A-H (Date through Pickup 7d),
-    # matching how the sheet is reviewed day to day.
-    ws.freeze_panes = "I2"
+    # Freezes the header row plus columns A-I (Date through Compset
+    # Occupancy %) -- extended to include I when Compset Occupancy moved
+    # there (2026-10-13), so it stays visible alongside the other at-a-
+    # glance columns while scrolling right to Suggested Bump/Signal/etc.
+    ws.freeze_panes = "J2"
 
     _write_header(ws)
     _write_data_rows(ws, records, pull_date, previous_state)
@@ -739,7 +744,7 @@ def build_workbook(records, pull_date, previous_state, previous_path=None):
     _write_paste_target_sheet(
         wb, MARKET_OCCUPANCY_OUTPUT_SHEET_NAME,
         "Paste the PriceLabs performance-by-month export here, starting at A1 (headers included) -- "
-        "feeds Median Booking Window (Daily Pacing column Q).",
+        "feeds Median Booking Window (Daily Pacing column R).",
     )
     _write_compset_data_sheet(wb, config.FORECAST_DAYS)
 
@@ -747,7 +752,27 @@ def build_workbook(records, pull_date, previous_state, previous_path=None):
     # wipes the user's last paste -- he only needs to re-paste when he
     # actually wants fresh numbers (see this module's docstring).
     copy_pasted_sheets(previous_path, wb)
+
+    _reorder_sheets(wb)
     return wb
+
+
+# 2026-10-13: tab order the user actually wants -- the paste targets
+# first (the sheets he touches), then Daily Pacing, then Compset Data,
+# then the two reference-only tabs last.
+SHEET_ORDER = [
+    MKT_OCC_SHEET_NAME,
+    MARKET_OCCUPANCY_OUTPUT_SHEET_NAME,
+    COMPSET_CAL_SHEET_NAME,
+    SHEET_NAME,
+    COMPSET_DATA_SHEET_NAME,
+    DAILY_REVIEW_STEPS_SHEET_NAME,
+    HOW_TO_USE_SHEET_NAME,
+]
+
+
+def _reorder_sheets(wb):
+    wb._sheets = [wb[name] for name in SHEET_ORDER if name in wb.sheetnames]
 
 
 def main():

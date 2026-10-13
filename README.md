@@ -136,14 +136,17 @@ calendar's current shape (7 comp listings + "Your Listing", columns B:Y)
 the only thing that needs editing if PriceLabs' comp-set size changes.
 
 **2026-10-11: Compset Occupancy % is also pulled onto Daily Pacing
-itself** (column V, a `VLOOKUP` by date into this tab's column B) — the
-one figure from this tab the user wanted on his daily working row, not
-tucked away on a separate tab. Deliberately **current occupancy only, no
-LY/STLY** (none exists for the comp set — see "Compset Cal is forward-
-only" above); the point is a quick read of whether his comp set (geared
+itself** (a `VLOOKUP` by date into this tab's column B) — the one figure
+from this tab the user wanted on his daily working row, not tucked away
+on a separate tab. Deliberately **current occupancy only, no LY/STLY**
+(none exists for the comp set — see "Compset Cal is forward-only"
+above); the point is a quick read of whether his comp set (geared
 toward his large-group/pool listings) is heavily booked on a given date,
 which he reads as a possible signal to push price, not a pacing
-comparison against last year.
+comparison against last year. **2026-10-13: moved from the end of the
+row to column I**, right after Pickup 7d (H) — the user wanted it
+grouped with the other at-a-glance market columns rather than off at
+the far right. Frozen panes extended from A:H to A:I accordingly.
 
 ### Trust guards that remain
 
@@ -217,14 +220,16 @@ A few things worth knowing about how it works:
   Drive desktop app — this only ever touches plain files on disk, no
   Drive API/OAuth. Set via the `PACING_DRIVE_SYNC_FOLDER` env var (or in
   `.env`, same as the API key); defaults to `data/` if unset.
-- The workbook now has **7 sheets**: **Daily Pacing** (the main sheet),
-  **Daily Review Steps**, **How To Use** (now plain instructions for the
-  paste workflow, not a Data Source table — there's no more per-pull API
-  data to show), **Neighborhood Data - Mkt Occ**, **Neighborhood Data -
-  Compset Cal**, and **Market Occupancy Output** (paste targets, see
-  above and below), and **Compset Data** (computed comparison, see
-  above).
-- **2026-10-11: Median Booking Window (column Q) moved off the old
+- The workbook now has **7 sheets**, in this order (`excel_report.SHEET_ORDER`,
+  set 2026-10-13 to match the order the user actually works through them —
+  paste targets first, then the sheets that read them, reference-only tabs
+  last): **Neighborhood Data - Mkt Occ**, **Market Occupancy Output**,
+  **Neighborhood Data - Compset Cal** (the 3 paste targets), **Daily
+  Pacing** (the main sheet), **Compset Data** (computed comparison, see
+  above), **Daily Review Steps**, and **How To Use** (now plain
+  instructions for the paste workflow, not a Data Source table — there's
+  no more per-pull API data to show).
+- **2026-10-11: Median Booking Window (column R) moved off the old
   hand-maintained "Booking Window" sheet onto a 4th paste target,
   "Market Occupancy Output"** — a real PriceLabs performance-by-month
   export (Period, Median Booking Window, Median Booked Length of Stay,
@@ -237,8 +242,9 @@ A few things worth knowing about how it works:
   other paste tabs.
 - **2026-10-11: "Live Override (PriceLabs)" (column W)** shows what's
   actually set on PriceLabs *right now* for each date — separate from
-  Override Request/Notes (M/N), which are what you're proposing to push
-  *next*. Unlike Mkt Occ/pickup, this one's still pulled live via the API
+  Override Request/Notes (N/O as of 2026-10-13, see below), which are
+  what you're proposing to push *next*. Unlike Mkt Occ/pickup, this one's
+  still pulled live via the API
   (`data_pull.fetch_live_overrides`/`combine_live_overrides`) — it's a
   plain per-date, per-listing read (`get_listing_date_overrides`, the
   same endpoint `push.py` already uses before every push, confirmed live
@@ -277,8 +283,8 @@ rendered invisibly. Fixed and covered by a regression test.
 
 ## Push mode
 
-`pacing_tracker/push.py` reads Override Request (column M) and Notes
-(column N) from a reviewed workbook and pushes them to PriceLabs as
+`pacing_tracker/push.py` reads Override Request (column N) and Notes
+(column O) from a reviewed workbook and pushes them to PriceLabs as
 date-specific `price_type: "percent"` overrides, per the spec's push
 workflow:
 

@@ -17,17 +17,17 @@ from pacing_tracker.carryforward import (
 
 def _write_fake_workbook(path, rows):
     """rows: list of (date, signal, override_request, notes) -- mimics the
-    Daily Pacing sheet's columns A/L/M/N (indices 0/11/12/13).
+    Daily Pacing sheet's columns A/M/N/O (indices 0/12/13/14).
     """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Daily Pacing"
-    ws.append(["Date"] + [f"col{i}" for i in range(1, 21)])  # A..U header
+    ws.append(["Date"] + [f"col{i}" for i in range(1, 22)])  # A..V header
     for d, signal, override_request, notes in rows:
-        row = [d] + [None] * 20
-        row[11] = signal
-        row[12] = override_request
-        row[13] = notes
+        row = [d] + [None] * 21
+        row[12] = signal
+        row[13] = override_request
+        row[14] = notes
         ws.append(row)
     wb.save(path)
 

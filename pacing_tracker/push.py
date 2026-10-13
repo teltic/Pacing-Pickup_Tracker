@@ -56,8 +56,9 @@ REASON_MAX_LEN = 255
 
 # 0-based column indices within the Daily Pacing sheet's row tuples.
 # 2026-10-07: shifted left (Pickup 3d/14d/30d/60d dropped) -- Override
-# Request=M, Notes=N.
-COL_DATE, COL_OVERRIDE_REQUEST, COL_NOTES = 0, 12, 13
+# Request=M, Notes=N. 2026-10-13: shifted right by one again (Compset
+# Occupancy % inserted after Pickup 7d) -- Override Request=N, Notes=O.
+COL_DATE, COL_OVERRIDE_REQUEST, COL_NOTES = 0, 13, 14
 
 
 def _format_percent(fraction):

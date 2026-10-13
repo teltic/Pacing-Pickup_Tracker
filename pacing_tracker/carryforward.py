@@ -17,8 +17,10 @@ FILENAME_RE = re.compile(r"Daily_Pacing_Pickup_(\d{1,2})\.(\d{1,2})\.(\d{2})\.xl
 
 # 0-based column indices within the Daily Pacing sheet's row tuples.
 # 2026-10-07: shifted left (Pickup 3d/14d/30d/60d dropped) -- Signal=L,
-# Override Request=M, Notes=N.
-COL_DATE, COL_SIGNAL, COL_OVERRIDE_REQUEST, COL_NOTES = 0, 11, 12, 13
+# Override Request=M, Notes=N. 2026-10-13: shifted right by one again
+# (Compset Occupancy % inserted after Pickup 7d) -- Signal=M, Override
+# Request=N, Notes=O.
+COL_DATE, COL_SIGNAL, COL_OVERRIDE_REQUEST, COL_NOTES = 0, 12, 13, 14
 
 # Sheets that hold a raw paste of a PriceLabs dashboard export (see
 # excel_report.py's module docstring) rather than anything this tool

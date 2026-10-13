@@ -30,12 +30,12 @@ from pacing_tracker.excel_report import (
 # in the original reference file to extract from.
 EXPECTED_SUGGESTED_BUMP_ROW2 = (
     '=IF(C2=100,"",IF(AND(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),'
-    '$Y$12,$Y$11),G2<$Y$13),-$Y$19/100,IF(AND(F2>=$Y$16,IFERROR(P2>=$Y$17*Q2,FALSE()),'
-    'G2<-$Y$2,G2>=-$Y$18),"Hold - high LY, outside window",IF(AND(G2<-$Y$2,J2>1),'
-    '"⚠ Mixed – review",IF(G2<-$Y$2,-IF(I2>2.5,20,IF(I2>1.5,10,5))/100,'
-    'IF(AND(J2>1,G2<=$Y$2,P2<=Q2),"Hold - within booking window",'
-    'IF(OR(G2>$Y$2,J2>1),IF(MAX(I2,J2)>IF(F2>=$Y$14,$Y$15,2.5),20,'
-    'IF(MAX(I2,J2)>1.5,10,5))/100,"")))))))'
+    '$Y$12,$Y$11),G2<$Y$13),-$Y$19/100,IF(AND(F2>=$Y$16,IFERROR(Q2>=$Y$17*R2,FALSE()),'
+    'G2<-$Y$2,G2>=-$Y$18),"Hold - high LY, outside window",IF(AND(G2<-$Y$2,K2>1),'
+    '"⚠ Mixed – review",IF(G2<-$Y$2,-IF(J2>2.5,20,IF(J2>1.5,10,5))/100,'
+    'IF(AND(K2>1,G2<=$Y$2,Q2<=R2),"Hold - within booking window",'
+    'IF(OR(G2>$Y$2,K2>1),IF(MAX(J2,K2)>IF(F2>=$Y$14,$Y$15,2.5),20,'
+    'IF(MAX(J2,K2)>1.5,10,5))/100,"")))))))'
 )
 EXPECTED_SIGNAL_ROW2 = (
     '=IF(C2=100,"✓ Booked",TRIM(IF(G2>$Y$2,"▲ Ahead ","")&IF(G2<-$Y$2,"▼ Behind ","")&'
@@ -46,7 +46,7 @@ EXPECTED_SUGGESTED_NOTE_ROW2 = (
     'G2<$Y$13),"9/11 - LY below "&IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),'
     '$Y$12,$Y$11)&"%",IF(G2<-$Y$2,"9/11 - Pacing behind by "&TEXT(G2,"0.00")&"%",'
     'IF(G2>$Y$2,"9/11 - Pacing ahead by "&TEXT(G2,"0.00")&"%",'
-    'IF(J2>1,"9/11 - Pickup demand spike",""))))'
+    'IF(K2>1,"9/11 - Pickup demand spike",""))))'
 )
 EXPECTED_DAYS_OUT_ROW2 = "=A2-TODAY()"
 EXPECTED_MEDIAN_BOOKING_WINDOW_ROW2 = (
@@ -54,13 +54,13 @@ EXPECTED_MEDIAN_BOOKING_WINDOW_ROW2 = (
     "'Market Occupancy Output'!$B$2:$B$1000),\"\")"
 )
 EXPECTED_OVERRIDE_STATUS_ROW2 = (
-    '=IF(ISBLANK(M2),"",IF(AND(IF(ISNUMBER(M2),M2<0,LEFT(M2,1)="-")=FALSE(),'
-    'NOT(OR(ISNUMBER(SEARCH("Ahead",L2)),ISNUMBER(SEARCH("Spike",L2))))),'
+    '=IF(ISBLANK(N2),"",IF(AND(IF(ISNUMBER(N2),N2<0,LEFT(N2,1)="-")=FALSE(),'
+    'NOT(OR(ISNUMBER(SEARCH("Ahead",M2)),ISNUMBER(SEARCH("Spike",M2))))),'
     '"Review - pace normalized",""))'
 )
 EXPECTED_NEW_SINCE_LAST_REVIEW_ROW2 = (
-    '=IF(OR(AND(ISNUMBER(SEARCH("Ahead",L2)),NOT(ISNUMBER(SEARCH("Ahead","▼ Behind ⚡ Spike")))),'
-    'AND(ISNUMBER(SEARCH("Spike",L2)),NOT(ISNUMBER(SEARCH("Spike","▼ Behind ⚡ Spike"))))),"NEW","")'
+    '=IF(OR(AND(ISNUMBER(SEARCH("Ahead",M2)),NOT(ISNUMBER(SEARCH("Ahead","▼ Behind ⚡ Spike")))),'
+    'AND(ISNUMBER(SEARCH("Spike",M2)),NOT(ISNUMBER(SEARCH("Spike","▼ Behind ⚡ Spike"))))),"NEW","")'
 )
 
 
@@ -90,7 +90,7 @@ class StaleNoteConditionTest(unittest.TestCase):
 
     def test_parses_notes_own_leading_date_not_a_separate_field(self):
         result = _stale_note_condition(2)
-        self.assertIn('FIND(" - ",N2)', result)
+        self.assertIn('FIND(" - ",O2)', result)
         self.assertIn('FIND("/",', result)
 
     def test_handles_a_note_that_doesnt_match_the_convention(self):
@@ -211,14 +211,32 @@ class MktOccVlookupTest(unittest.TestCase):
 
 
 class BuildWorkbookTest(unittest.TestCase):
+    def test_sheet_order_matches_the_users_requested_order(self):
+        # 2026-10-13: the user wants the paste targets first (what he
+        # actually touches day to day), then Daily Pacing, then Compset
+        # Data, with the two reference-only tabs last.
+        wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
+        self.assertEqual(
+            wb.sheetnames,
+            [
+                MKT_OCC_SHEET_NAME,
+                "Market Occupancy Output",
+                COMPSET_CAL_SHEET_NAME,
+                "Daily Pacing",
+                COMPSET_DATA_SHEET_NAME,
+                "Daily Review Steps",
+                "How To Use",
+            ],
+        )
+
     def test_header_row(self):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
         ws = wb["Daily Pacing"]
         self.assertEqual(ws["A1"].value, "Date")
-        self.assertEqual(ws["L1"].value, "Signal")
-        self.assertEqual(ws["T1"].value, "New Since Last Review")
-        self.assertEqual(ws["U1"].value, "Review Bucket")
-        self.assertEqual(ws["V1"].value, "Compset Occupancy %")
+        self.assertEqual(ws["M1"].value, "Signal")
+        self.assertEqual(ws["U1"].value, "New Since Last Review")
+        self.assertEqual(ws["V1"].value, "Review Bucket")
+        self.assertEqual(ws["I1"].value, "Compset Occupancy %")
         self.assertEqual(ws["W1"].value, "Live Override (PriceLabs)")
 
     def test_live_override_is_written_as_a_raw_value_from_the_record(self):
@@ -238,11 +256,11 @@ class BuildWorkbookTest(unittest.TestCase):
         # booked on a date.
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
         ws = wb["Daily Pacing"]
-        formula = str(ws["V2"].value)
+        formula = str(ws["I2"].value)
         self.assertTrue(formula.startswith("=IFERROR(VLOOKUP($A2,"))
         self.assertIn(f"'{COMPSET_DATA_SHEET_NAME}'!$A:$B", formula)
         self.assertIn(",2,FALSE())", formula)
-        self.assertEqual(ws["V2"].number_format, "0.00\\%")
+        self.assertEqual(ws["I2"].number_format, "0.00\\%")
 
     def test_market_columns_are_formulas_into_the_pasted_tab_not_raw_values(self):
         # 2026-10-07: D/E/F/H no longer come from data_pull.py at all --
@@ -264,14 +282,14 @@ class BuildWorkbookTest(unittest.TestCase):
         self.assertNotIn("%", SUGGESTED_BUMP_FORMAT)
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
         ws = wb["Daily Pacing"]
-        self.assertEqual(ws["K2"].number_format, SUGGESTED_BUMP_FORMAT)
+        self.assertEqual(ws["L2"].number_format, SUGGESTED_BUMP_FORMAT)
 
     def test_pace_and_pickup_ratio_columns_are_grouped_and_hidden(self):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
         ws = wb["Daily Pacing"]
-        group = ws.column_dimensions["I"]
+        group = ws.column_dimensions["J"]
         self.assertTrue(group.hidden)
-        self.assertEqual((group.min, group.max), (9, 10))  # I through J
+        self.assertEqual((group.min, group.max), (10, 11))  # J through K
 
     def test_daily_review_steps_sheet_matches_config(self):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
@@ -288,14 +306,14 @@ class BuildWorkbookTest(unittest.TestCase):
         previous_state = {"2026-09-12": {"override_request": -0.1, "notes": "9/11 - behind", "signal": "▼ Behind"}}
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), previous_state)
         ws = wb["Daily Pacing"]
-        self.assertEqual(ws["M2"].value, -0.1)
-        self.assertEqual(ws["N2"].value, "9/11 - behind")
+        self.assertEqual(ws["N2"].value, -0.1)
+        self.assertEqual(ws["O2"].value, "9/11 - behind")
 
     def test_blank_override_request_when_no_prior_state(self):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
         ws = wb["Daily Pacing"]
-        self.assertIsNone(ws["M2"].value)
         self.assertIsNone(ws["N2"].value)
+        self.assertIsNone(ws["O2"].value)
 
     def test_threshold_block_matches_config(self):
         wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
