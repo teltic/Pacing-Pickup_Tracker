@@ -313,7 +313,14 @@ def _override_status_formula(r):
 
 def _new_since_last_review_formula(r, previous_signal):
     p = f"{COL['signal']}{r}"
-    prev = (previous_signal or "").replace('"', '""')
+    # Defense in depth: previous_signal is read from a previous file by
+    # header name now (see carryforward.load_previous_state), so this
+    # should always be text or None -- but a malformed/foreign file could
+    # still hand back something else, and "no usable previous signal" is
+    # the right fallback for that, not a crash (see the 2026-10-14
+    # incident in carryforward.py's module docstring).
+    previous_signal = previous_signal if isinstance(previous_signal, str) else ""
+    prev = previous_signal.replace('"', '""')
     return (
         f"=IF(OR("
         f'AND(ISNUMBER(SEARCH("Ahead",{p})),NOT(ISNUMBER(SEARCH("Ahead","{prev}")))),'

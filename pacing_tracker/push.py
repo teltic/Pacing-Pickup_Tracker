@@ -45,7 +45,7 @@ import openpyxl
 
 from . import config
 from .api_client import PriceLabsClient
-from .carryforward import find_latest_file, load_previous_state_for_folder, parse_filename_date
+from .carryforward import find_latest_file, header_column_map, load_previous_state_for_folder, parse_filename_date
 
 # Fields a bare {date, price, price_type, reason} override always carries
 # -- anything else present (min_stay, min/max price, check-in/out rules,
@@ -54,11 +54,19 @@ _OVERRIDE_META_KEYS = {"date", "price", "price_type", "reason", "created_at", "u
 
 REASON_MAX_LEN = 255
 
-# 0-based column indices within the Daily Pacing sheet's row tuples.
-# 2026-10-07: shifted left (Pickup 3d/14d/30d/60d dropped) -- Override
-# Request=M, Notes=N. 2026-10-13: shifted right by one again (Compset
-# Occupancy % inserted after Pickup 7d) -- Override Request=N, Notes=O.
-COL_DATE, COL_OVERRIDE_REQUEST, COL_NOTES = 0, 13, 14
+# 2026-10-14: these used to be fixed column indices, which broke the day
+# after any column reorder (see carryforward.py's module docstring for
+# the incident this caused). Found by header text instead -- see
+# _header_columns below.
+REQUIRED_HEADERS = ("Date", "Override Request", "Notes")
+
+
+def _header_columns(ws):
+    headers = header_column_map(ws)
+    missing = [h for h in REQUIRED_HEADERS if h not in headers]
+    if missing:
+        raise ValueError(f"Daily Pacing is missing expected header(s) {missing} -- can't read overrides.")
+    return headers["Date"], headers["Override Request"], headers["Notes"]
 
 
 def _format_percent(fraction):
@@ -81,18 +89,19 @@ def read_planned_overrides(workbook_path, as_of=None):
     as_of = as_of or date.today()
     wb = openpyxl.load_workbook(workbook_path, data_only=True)
     ws = wb["Daily Pacing"]
+    col_date, col_override_request, col_notes = _header_columns(ws)
     planned = []
     for row in ws.iter_rows(min_row=2):
-        override_request = row[COL_OVERRIDE_REQUEST].value
+        override_request = row[col_override_request].value
         if override_request in (None, ""):
             continue
-        row_date = row[COL_DATE].value
+        row_date = row[col_date].value
         if row_date is None:
             continue
         row_date = row_date.date() if hasattr(row_date, "date") else row_date
         if row_date < as_of:
             continue
-        notes = row[COL_NOTES].value or ""
+        notes = row[col_notes].value or ""
         planned.append(
             {
                 "date": row_date.isoformat(),
@@ -120,15 +129,16 @@ def find_cleared_dates(workbook_path, as_of=None):
 
     wb = openpyxl.load_workbook(workbook_path, data_only=True)
     ws = wb["Daily Pacing"]
+    col_date, col_override_request, _col_notes = _header_columns(ws)
     cleared = []
     for row in ws.iter_rows(min_row=2):
-        row_date = row[COL_DATE].value
+        row_date = row[col_date].value
         if row_date is None:
             continue
         row_date = row_date.date() if hasattr(row_date, "date") else row_date
         if row_date < as_of:
             continue
-        if row[COL_OVERRIDE_REQUEST].value not in (None, ""):
+        if row[col_override_request].value not in (None, ""):
             continue
         prev = previous_state.get(row_date.isoformat(), {})
         if prev.get("override_request") not in (None, ""):

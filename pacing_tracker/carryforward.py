@@ -15,12 +15,20 @@ import openpyxl
 
 FILENAME_RE = re.compile(r"Daily_Pacing_Pickup_(\d{1,2})\.(\d{1,2})\.(\d{2})\.xlsx$")
 
-# 0-based column indices within the Daily Pacing sheet's row tuples.
-# 2026-10-07: shifted left (Pickup 3d/14d/30d/60d dropped) -- Signal=L,
-# Override Request=M, Notes=N. 2026-10-13: shifted right by one again
-# (Compset Occupancy % inserted after Pickup 7d) -- Signal=M, Override
-# Request=N, Notes=O.
-COL_DATE, COL_SIGNAL, COL_OVERRIDE_REQUEST, COL_NOTES = 0, 12, 13, 14
+# 2026-10-14: this used to be fixed column indices (COL_SIGNAL=12 etc),
+# which broke the very next day after the 2026-10-13 column reorder --
+# "yesterday's file" was generated under the OLD layout, so reading it
+# with TODAY's fixed indices pulled whatever used to live at that
+# position instead (Override Request's old column, read as if it were
+# Signal, crashed _new_since_last_review_formula since it got a number
+# instead of text -- and would have just as silently mixed up Override
+# Request/Notes without crashing, if the types happened to line up).
+# Reading by the header ROW TEXT instead means a previous file survives
+# any future column reorder as long as the header text itself doesn't
+# change -- which is the actual stable thing across reorders, not the
+# position.
+HEADER_ROW = 1
+REQUIRED_HEADERS = ("Date", "Signal", "Override Request", "Notes")
 
 # Sheets that hold a raw paste of a PriceLabs dashboard export (see
 # excel_report.py's module docstring) rather than anything this tool
@@ -74,23 +82,47 @@ def find_latest_file(folder):
     return dated[-1][1] if dated else None
 
 
+def header_column_map(ws, header_row=HEADER_ROW):
+    """{header_text: 0-based column index} from the given sheet's header
+    row -- lets callers find "Signal"/"Override Request"/etc. by name
+    rather than assuming today's code and the file on disk agree on
+    column position.
+    """
+    return {
+        cell.value: i
+        for i, cell in enumerate(next(ws.iter_rows(min_row=header_row, max_row=header_row)))
+        if cell.value is not None
+    }
+
+
 def load_previous_state(path):
     """{date_str: {"override_request", "notes", "signal"}} keyed by ISO
     date, read from a previously-generated (and recalculated -- this needs
-    cached formula values, not just formula strings) workbook.
+    cached formula values, not just formula strings) workbook. Columns are
+    found by header text, not position -- see the module docstring on why
+    that matters whenever Daily Pacing's column layout changes.
     """
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb["Daily Pacing"]
+    headers = header_column_map(ws)
+    missing = [h for h in REQUIRED_HEADERS if h not in headers]
+    if missing:
+        raise ValueError(f"{path}: Daily Pacing is missing expected header(s) {missing} -- can't carry state forward.")
+    col_date = headers["Date"]
+    col_signal = headers["Signal"]
+    col_override_request = headers["Override Request"]
+    col_notes = headers["Notes"]
+
     state = {}
     for row in ws.iter_rows(min_row=2):
-        date_value = row[COL_DATE].value
+        date_value = row[col_date].value
         if date_value is None:
             continue
         date_str = date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
         state[date_str] = {
-            "override_request": row[COL_OVERRIDE_REQUEST].value,
-            "notes": row[COL_NOTES].value,
-            "signal": row[COL_SIGNAL].value,
+            "override_request": row[col_override_request].value,
+            "notes": row[col_notes].value,
+            "signal": row[col_signal].value,
         }
     return state
 

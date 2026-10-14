@@ -15,16 +15,27 @@ from pacing_tracker.push import (
 )
 
 
-def _write_workbook(path, rows):
-    """rows: list of (date_obj_or_None, override_request, notes)."""
+def _write_workbook(path, rows, override_request_col=13, notes_col=14, signal_col=12):
+    """rows: list of (date_obj_or_None, override_request, notes). Column
+    positions are adjustable so tests can simulate a file saved under an
+    older layout -- read_planned_overrides/find_cleared_dates are
+    supposed to find the right cells by header text regardless of
+    position (same 2026-10-14 incident as carryforward.py). A "Signal"
+    header is always included (unused here) since find_cleared_dates goes
+    through carryforward.load_previous_state, which requires it.
+    """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Daily Pacing"
-    ws.append(["Date"] + [f"col{i}" for i in range(1, 22)])
+    headers = ["Date"] + [f"col{i}" for i in range(1, 22)]
+    headers[signal_col] = "Signal"
+    headers[override_request_col] = "Override Request"
+    headers[notes_col] = "Notes"
+    ws.append(headers)
     for d, override_request, notes in rows:
         row = [d] + [None] * 21
-        row[13] = override_request  # N
-        row[14] = notes  # O
+        row[override_request_col] = override_request
+        row[notes_col] = notes
         ws.append(row)
     wb.save(path)
 
@@ -66,6 +77,17 @@ class ReadPlannedOverridesTest(unittest.TestCase):
             _write_workbook(path, [(date(2026, 9, 12), -0.1, long_note)])
             planned = read_planned_overrides(path, as_of=date(2026, 9, 12))
             self.assertEqual(len(planned[0]["reason"]), 255)
+
+    def test_finds_columns_by_header_regardless_of_position(self):
+        # 2026-10-14 incident -- see carryforward.py's module docstring.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "reviewed.xlsx")
+            _write_workbook(
+                path, [(date(2026, 9, 12), -0.1, "test")],
+                signal_col=10, override_request_col=11, notes_col=12,  # a different layout
+            )
+            planned = read_planned_overrides(path, as_of=date(2026, 9, 12))
+            self.assertEqual(planned, [{"date": "2026-09-12", "price": "-10", "reason": "test"}])
 
 
 class FindClearedDatesTest(unittest.TestCase):
