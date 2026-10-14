@@ -201,6 +201,13 @@ THRESHOLD_ROWS = [
     (17, "Far-out hold: booking-window multiple", "far_out_hold_booking_window_multiple"),
     (18, "Far-out hold: max behind-pace", "far_out_hold_max_behind_pace"),
     (19, "Low-LY cut amount", "low_ly_cut_percent"),
+    (20, "Compset weekday gold >", "compset_weekday_gold_above"),
+    (21, "Compset weekday green >", "compset_weekday_green_above"),
+    (22, "Compset weekday dark green >", "compset_weekday_dark_green_above"),
+    (23, "Compset weekend gold >", "compset_weekend_gold_above"),
+    (24, "Compset weekend green >", "compset_weekend_green_above"),
+    (25, "Compset weekend dark green >", "compset_weekend_dark_green_above"),
+    (26, "Compset vs Mkt Occ gap >", "compset_vs_market_gap_pts"),
 ]
 THRESHOLD_HEADER_ROW = 1
 THRESHOLD_LABEL_COL, THRESHOLD_VALUE_COL = "X", "Y"
@@ -258,11 +265,19 @@ def _suggested_bump_formula(r):
 def _signal_formula(r):
     g, h = (f"{COL[c]}{r}" for c in ("pace_vs_stly", "pickup_7d"))
     occ = f"{COL['occupancy']}{r}"
+    # Comp Hot/Cold (2026-10-15): compares Compset Occupancy (the user's
+    # own big-group/pool-home niche) against Mkt Occ % (the broader
+    # market) -- NOT against the user's own booked occupancy. A big gap
+    # either way is a demand signal worth seeing; advisory only (no
+    # Suggested Bump change) until it's been watched for a while.
+    mkt, compset = (f"{COL[c]}{r}" for c in ("mkt_occ", "compset_occupancy"))
     return (
         f'=IF({occ}=100,"✓ Booked",TRIM('
         f'IF({g}>$Y$2,"▲ Ahead ","")&'
         f'IF({g}<-$Y$2,"▼ Behind ","")&'
-        f'IF({h}>$Y$3,"⚡ Spike ","")'
+        f'IF({h}>$Y$3,"⚡ Spike ","")&'
+        f'IF({compset}-{mkt}>$Y$26,"🔥 Comp Hot ","")&'
+        f'IF({mkt}-{compset}>$Y$26,"🧊 Comp Cold ","")'
         f"))"
     )
 
@@ -667,6 +682,31 @@ def _apply_conditional_formatting(ws, last_row):
     )
     ws.conditional_formatting.add(
         f_range, FormulaRule(formula=[f"AND({is_weekend},F2>=$Y$9)"], fill=fmt("med_green"))
+    )
+
+    # Compset Occupancy % (I) is banded weekday vs weekend separately, same
+    # reasoning as F -- the user's comp set (3-5BR pool/large-group homes)
+    # skews heavily to weekend/event bookings. Below the "gold" cutoff is
+    # left unfilled (nothing notable); above it, three bounded bands so
+    # exactly one rule ever matches a given cell.
+    i_range = f"I2:I{last_row}"
+    ws.conditional_formatting.add(
+        i_range, FormulaRule(formula=[f"AND({not_weekend},I2>$Y$20,I2<=$Y$21)"], fill=fmt("light_gold"))
+    )
+    ws.conditional_formatting.add(
+        i_range, FormulaRule(formula=[f"AND({not_weekend},I2>$Y$21,I2<=$Y$22)"], fill=fmt("light_green"))
+    )
+    ws.conditional_formatting.add(
+        i_range, FormulaRule(formula=[f"AND({not_weekend},I2>$Y$22)"], fill=fmt("dark_green"))
+    )
+    ws.conditional_formatting.add(
+        i_range, FormulaRule(formula=[f"AND({is_weekend},I2>$Y$23,I2<=$Y$24)"], fill=fmt("light_gold"))
+    )
+    ws.conditional_formatting.add(
+        i_range, FormulaRule(formula=[f"AND({is_weekend},I2>$Y$24,I2<=$Y$25)"], fill=fmt("light_green"))
+    )
+    ws.conditional_formatting.add(
+        i_range, FormulaRule(formula=[f"AND({is_weekend},I2>$Y$25)"], fill=fmt("dark_green"))
     )
 
     op_range = f"L2:M{last_row}"

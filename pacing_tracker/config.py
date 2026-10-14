@@ -112,6 +112,27 @@ THRESHOLDS = {
     # user's notes and Suggested Note both already use), so this needs no
     # separate "reviewed until" field to maintain by hand.
     "note_stale_after_days": 14,
+    # 2026-10-15: visual-only banding for Compset Occupancy % (column I),
+    # weekday/weekend scaled separately -- the user's comp set is 3-5BR
+    # pool/large-group homes, which skew heavily to weekend/event bookings,
+    # so (like Mkt Occ % LY) a flat threshold would make weekdays look
+    # "normal" always and miss real weekend signal. Starting points, not
+    # yet checked against this specific column's live distribution the
+    # way Mkt Occ % LY's bands were -- tune after a couple weeks of real
+    # data the same way.
+    "compset_weekday_gold_above": 20,
+    "compset_weekday_green_above": 50,
+    "compset_weekday_dark_green_above": 80,
+    "compset_weekend_gold_above": 40,
+    "compset_weekend_green_above": 70,
+    "compset_weekend_dark_green_above": 90,
+    # How many points Compset Occupancy must lead or trail Mkt Occ % by
+    # (the broader market, not the user's own booked occupancy) before
+    # Signal flags it as "Comp Hot"/"Comp Cold" -- the user's own call:
+    # a big gap between his big-group/pool niche and the general market
+    # is worth seeing, but advisory only (no Suggested Bump change yet)
+    # until he's watched it fire for a while and trusts it.
+    "compset_vs_market_gap_pts": 30,
 }
 
 # 2026-10-11: the hand-maintained MEDIAN_BOOKING_WINDOW_BY_MONTH table (a

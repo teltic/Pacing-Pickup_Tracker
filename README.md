@@ -148,6 +148,28 @@ row to column I**, right after Pickup 7d (H) — the user wanted it
 grouped with the other at-a-glance market columns rather than off at
 the far right. Frozen panes extended from A:H to A:I accordingly.
 
+**2026-10-15: Compset Occupancy % gets weekday/weekend-aware color
+bands** (`compset_weekday_*_above`/`compset_weekend_*_above` in
+`config.THRESHOLDS`), same reasoning as Mkt Occ % LY (F) — the user's
+comp set skews heavily to weekend/event bookings, so a flat threshold
+would make weekdays look "normal" always. Starting points (20/50/80
+weekday, 40/70/90 weekend), not yet checked against this column's own
+live distribution — tune after a couple weeks of real data.
+
+**Signal also gained a "🔥 Comp Hot"/"🧊 Comp Cold" badge**, comparing
+Compset Occupancy against Mkt Occ % (D) — **the broader market, not the
+user's own booked occupancy** (he was explicit about this: it's his
+big-group/pool-home niche vs. the general market, not himself vs. his
+comp set). A gap past `compset_vs_market_gap_pts` (default 30 points)
+either direction fires the badge. Deliberately **advisory only** — it
+doesn't change Suggested Bump's math. The user's own call: every other
+signal on this sheet (the LY bands, the pace ladder) only earned its
+way into the actual dollar amount after being watched for weeks and
+trusted; Compset Occupancy is brand new and he explicitly didn't want
+it driving decisions yet. If he later wants it in the ladder, the
+natural next step is folding the gap into the same 5/10/20% tiers
+Suggested Bump's pace/pickup ratios already use, not a parallel rule.
+
 ### Trust guards that remain
 
 - `_check_listing_count()` still hard-fails the pull if Report Builder's
@@ -303,7 +325,15 @@ workflow:
   restrict to one) — Pace/Pickup are market-level signals shared by both
   listings, not listing-specific.
 - Notes text becomes the override's `reason` (truncated to 255 chars,
-  PriceLabs' own limit).
+  PriceLabs' own limit) — **the same single Notes value goes to both
+  listings, and fully overwrites whatever `reason` each listing already
+  had** (same as `price` — `_merge_override` replaces both wholesale,
+  while preserving everything else already on that listing's own
+  override, like `min_stay`). If the two listings' live `reason`s ever
+  differed before a push (visible via the "Live Override" column's
+  `⚠ differs:` flag), the next push makes them identical. There's no
+  per-listing notes field and no history kept in PriceLabs' own
+  `reason` — only the sheet's own carried-forward Notes column has that.
 - **Dry-run by default.** Nothing is ever written to PriceLabs unless you
   pass `--confirm`.
 - `--workbook` is optional — omit it and `push.py` finds the most recent

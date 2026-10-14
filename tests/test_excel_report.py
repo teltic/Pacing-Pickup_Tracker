@@ -39,7 +39,7 @@ EXPECTED_SUGGESTED_BUMP_ROW2 = (
 )
 EXPECTED_SIGNAL_ROW2 = (
     '=IF(C2=100,"✓ Booked",TRIM(IF(G2>$Y$2,"▲ Ahead ","")&IF(G2<-$Y$2,"▼ Behind ","")&'
-    'IF(H2>$Y$3,"⚡ Spike ","")))'
+    'IF(H2>$Y$3,"⚡ Spike ","")&IF(I2-D2>$Y$26,"🔥 Comp Hot ","")&IF(D2-I2>$Y$26,"🧊 Comp Cold ","")))'
 )
 EXPECTED_SUGGESTED_NOTE_ROW2 = (
     '=IF(AND(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),$Y$12,$Y$11),'
@@ -159,6 +159,16 @@ class FormulaRegressionTest(unittest.TestCase):
         # them were removed rather than left dead with nothing feeding them.
         self.assertNotIn("Elevated", _signal_formula(2))
         self.assertNotIn("watch", _suggested_bump_formula(2))
+
+    def test_comp_hot_cold_compares_compset_to_mkt_occ_not_own_occupancy(self):
+        # 2026-10-15: the user was explicit this compares Compset
+        # Occupancy (I) against Mkt Occ % (D, the broader market) --
+        # NOT his own booked Occupancy % (C).
+        result = _signal_formula(2)
+        self.assertIn('IF(I2-D2>$Y$26,"🔥 Comp Hot ","")', result)
+        self.assertIn('IF(D2-I2>$Y$26,"🧊 Comp Cold ","")', result)
+        self.assertNotIn("C2-I2", result)
+        self.assertNotIn("I2-C2", result)
 
 
 class LowLyCutTest(unittest.TestCase):
@@ -321,6 +331,8 @@ class BuildWorkbookTest(unittest.TestCase):
         self.assertEqual(ws["Y2"].value, config.THRESHOLDS["pace_threshold"])
         self.assertEqual(ws["Y4"].value, config.THRESHOLDS["ly_weekday_severe_below"])
         self.assertEqual(ws["Y18"].value, config.THRESHOLDS["far_out_hold_max_behind_pace"])
+        self.assertEqual(ws["Y22"].value, config.THRESHOLDS["compset_weekday_dark_green_above"])
+        self.assertEqual(ws["Y26"].value, config.THRESHOLDS["compset_vs_market_gap_pts"])
 
     def test_market_occupancy_output_sheet_is_a_paste_target(self):
         # 2026-10-11: replaced the hand-maintained Booking Window sheet --
@@ -380,6 +392,28 @@ class BuildWorkbookTest(unittest.TestCase):
         self.assertIn("F2<=$Y$7", joined)  # weekend severe
         self.assertIn("F2<=$Y$8", joined)  # weekend below-avg
         self.assertIn("F2>=$Y$9", joined)  # weekend high
+
+    def test_compset_occupancy_bands_are_weekday_weekend_aware(self):
+        wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
+        ws = wb["Daily Pacing"]
+        formulas = [
+            rule.formula[0]
+            for rng, rules in ws.conditional_formatting._cf_rules.items()
+            if str(rng.sqref).startswith("I2")
+            for rule in rules
+        ]
+        self.assertEqual(len(formulas), 6)
+        weekday_formulas = [f for f in formulas if "NOT(OR(ISNUMBER" in f]
+        weekend_formulas = [f for f in formulas if f not in weekday_formulas]
+        self.assertEqual(len(weekday_formulas), 3)
+        self.assertEqual(len(weekend_formulas), 3)
+        joined = " ".join(formulas)
+        self.assertIn("I2>$Y$20,I2<=$Y$21", joined)  # weekday gold
+        self.assertIn("I2>$Y$21,I2<=$Y$22", joined)  # weekday green
+        self.assertIn("I2>$Y$22", joined)  # weekday dark green
+        self.assertIn("I2>$Y$23,I2<=$Y$24", joined)  # weekend gold
+        self.assertIn("I2>$Y$24,I2<=$Y$25", joined)  # weekend green
+        self.assertIn("I2>$Y$25", joined)  # weekend dark green
 
     def test_review_bucket_short_circuits_when_fully_booked(self):
         result = _review_bucket_formula(2)
