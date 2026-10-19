@@ -30,12 +30,13 @@ from pacing_tracker.excel_report import (
 # in the original reference file to extract from.
 EXPECTED_SUGGESTED_BUMP_ROW2 = (
     '=IF(C2=100,"",IF(AND(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),'
-    '$Y$12,$Y$11),G2<$Y$13),-$Y$19/100,IF(AND(F2>=$Y$16,IFERROR(Q2>=$Y$17*R2,FALSE()),'
+    '$Y$12,$Y$11),G2<$Y$13),-$Y$19/100,IF(AND(F2>=IF(OR(ISNUMBER(SEARCH("Fri",B2)),'
+    'ISNUMBER(SEARCH("Sat",B2))),$Y$27,$Y$16),IFERROR(Q2>=$Y$17*R2,FALSE()),'
     'G2<-$Y$2,G2>=-$Y$18),"Hold - high LY, outside window",IF(AND(G2<-$Y$2,K2>1),'
     '"⚠ Mixed – review",IF(G2<-$Y$2,-IF(J2>2.5,20,IF(J2>1.5,10,5))/100,'
-    'IF(AND(K2>1,G2<=$Y$2,Q2<=R2),"Hold - within booking window",'
-    'IF(OR(G2>$Y$2,K2>1),IF(MAX(J2,K2)>IF(F2>=$Y$14,$Y$15,2.5),20,'
-    'IF(MAX(J2,K2)>1.5,10,5))/100,"")))))))'
+    'IF(OR(G2>$Y$2,K2>1),IF(AND(Q2>=0,Q2<=R2),"Hold - within booking window",'
+    'IF(MAX(J2,K2)>IF(F2>=$Y$14,$Y$15,2.5),20,'
+    'IF(MAX(J2,K2)>1.5,10,5))/100),""))))))'
 )
 EXPECTED_SIGNAL_ROW2 = (
     '=IF(C2=100,"✓ Booked",TRIM(IF(G2>$Y$2,"▲ Ahead ","")&IF(G2<-$Y$2,"▼ Behind ","")&'
@@ -45,8 +46,9 @@ EXPECTED_SUGGESTED_NOTE_ROW2 = (
     '=IF(AND(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),$Y$12,$Y$11),'
     'G2<$Y$13),"9/11 - LY below "&IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),'
     '$Y$12,$Y$11)&"%",IF(G2<-$Y$2,"9/11 - Pacing behind by "&TEXT(G2,"0.00")&"%",'
+    'IF(AND(OR(G2>$Y$2,K2>1),AND(Q2>=0,Q2<=R2)),"9/11 - Hold - within booking window",'
     'IF(G2>$Y$2,"9/11 - Pacing ahead by "&TEXT(G2,"0.00")&"%",'
-    'IF(K2>1,"9/11 - Pickup demand spike",""))))'
+    'IF(K2>1,"9/11 - Pickup demand spike","")))))'
 )
 EXPECTED_DAYS_OUT_ROW2 = "=A2-TODAY()"
 EXPECTED_MEDIAN_BOOKING_WINDOW_ROW2 = (
@@ -67,10 +69,13 @@ EXPECTED_NEW_SINCE_LAST_REVIEW_ROW2 = (
 class ReviewBucketPriorityTest(unittest.TestCase):
     def test_tiers_appear_in_priority_order(self):
         result = _review_bucket_formula(2)
+        # 2026-10-19: "Within Window" promoted above the pace tiers it
+        # now supersedes (Suggested Bump holds any raise once inside the
+        # window, regardless of pace) -- this order should match that.
         labels = [
             "✓ Booked", "1. New", "2. Override Normalized", "2. Stale Note",
-            "3. Low LY", "3. High LY", "4. Pace >10%", "4. Pace 5-10%",
-            "5. Pickup Spike", "6. Within Window",
+            "3. Low LY", "3. High LY", "4. Within Window", "5. Pace >10%",
+            "5. Pace 5-10%", "6. Pickup Spike",
         ]
         positions = [result.index(label) for label in labels]
         self.assertEqual(positions, sorted(positions))
@@ -169,6 +174,48 @@ class FormulaRegressionTest(unittest.TestCase):
         self.assertIn('IF(D2-I2>$Y$26,"🧊 Comp Cold ","")', result)
         self.assertNotIn("C2-I2", result)
         self.assertNotIn("I2-C2", result)
+
+
+class WithinWindowSuppressesRaisesTest(unittest.TestCase):
+    def test_a_would_be_raise_becomes_hold_within_the_window_not_a_number(self):
+        # 2026-10-19: the user wants zero positive pushes once inside the
+        # booking window, even if pace/pickup would otherwise justify a
+        # raise -- this must win over the pace>10% tier, not the other
+        # way around. Structural check: the within-window condition
+        # gates the raise amount, not the other way around.
+        bump = _suggested_bump_formula(2)
+        self.assertIn(
+            'IF(AND(Q2>=0,Q2<=R2),"Hold - within booking window",'
+            "IF(MAX(J2,K2)>IF(F2>=$Y$14,$Y$15,2.5),20,IF(MAX(J2,K2)>1.5,10,5))/100)",
+            bump,
+        )
+
+    def test_suggested_note_never_contradicts_a_within_window_hold(self):
+        note = _suggested_note_formula(2, "9/11")
+        self.assertIn('"9/11 - Hold - within booking window"', note)
+
+    def test_review_bucket_within_window_outranks_the_pace_tiers(self):
+        result = _review_bucket_formula(2)
+        self.assertLess(result.index("4. Within Window"), result.index("5. Pace >10%"))
+        self.assertLess(result.index("4. Within Window"), result.index("5. Pace 5-10%"))
+
+
+class FarOutHoldTest(unittest.TestCase):
+    def test_ly_bar_is_weekday_weekend_aware_not_flat(self):
+        # 2026-10-19: was a flat 85% for both day types -- the user
+        # wants separate, lower bars (his own starting numbers: 40%
+        # weekday / 60% weekend) so a far-out, mildly-behind date isn't
+        # held just for being "not elite," only for being genuinely weak
+        # for its own day type.
+        bump = _suggested_bump_formula(2)
+        self.assertIn("$Y$16", bump)  # weekday bar
+        self.assertIn("$Y$27", bump)  # weekend bar
+
+    def test_threshold_block_has_both_day_type_bars(self):
+        wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
+        ws = wb["Daily Pacing"]
+        self.assertEqual(ws["Y16"].value, config.THRESHOLDS["far_out_hold_weekday_ly_threshold_pct"])
+        self.assertEqual(ws["Y27"].value, config.THRESHOLDS["far_out_hold_weekend_ly_threshold_pct"])
 
 
 class LowLyCutTest(unittest.TestCase):

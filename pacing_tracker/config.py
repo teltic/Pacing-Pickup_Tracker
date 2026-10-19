@@ -84,7 +84,15 @@ THRESHOLDS = {
     "low_ly_override_pace": 20,
     "high_ly_raise_ease_threshold_pct": 90,
     "high_ly_raise_ease_ratio_bar": 1.5,
-    "far_out_hold_ly_threshold_pct": 85,
+    # 2026-10-19: split into weekday/weekend variants and loosened (was a
+    # flat 85% for both) -- the user wants to resist cutting a far-out,
+    # mildly-behind date unless LY was *actually* weak for that day type,
+    # not just "not elite." 40/60 are his own starting numbers, not yet
+    # checked against this account's live LY distribution the way the
+    # F-column bands were -- revisit once there's a current file to
+    # analyze against.
+    "far_out_hold_weekday_ly_threshold_pct": 40,
+    "far_out_hold_weekend_ly_threshold_pct": 60,
     "far_out_hold_booking_window_multiple": 2,
     "far_out_hold_max_behind_pace": 10,
     # Visual-only banding for the Mkt Occ % LY column (F), weekday and
@@ -151,19 +159,25 @@ WEEKEND_DAYS = {"Fri", "Sat"}  # per spec: weekend = Fri-Sat, weekday = Sun-Thu
 # Written to a "Daily Review Steps" tab as plain reference text -- edit this
 # list (ask Claude to update it) as the routine changes; it's overwritten by
 # every regenerated workbook, so changes belong here, not typed into the tab.
-# Steps 1-6 are also implemented as the "Review Bucket" column (Y) on Daily
+# Steps 1-6 are also implemented as the "Review Bucket" column (V) on Daily
 # Pacing, so filtering that one column replaces running through them by hand.
+# 2026-10-19: column letters fixed (had drifted stale through several
+# earlier reorders -- X/W/U were correct once, not anymore), "Within
+# Window" promoted ahead of the pace steps to match Review Bucket's own
+# priority order now that it supersedes them (Suggested Bump holds any
+# raise once inside the window, regardless of pace).
 DAILY_REVIEW_STEPS = [
-    "1. Filter 'New Since Last Review' (X) for NEW.",
-    "2. Filter 'Override Status' (W) for 'Review - pace normalized'.",
+    "1. Filter 'New Since Last Review' (U) for NEW.",
+    "2. Filter 'Override Status' (T) for 'Review - pace normalized'.",
     "3. Filter 'Mkt Occ % LY' (F) -- review Low LY and High LY dates together, "
     "treating each group consistently.",
-    "4. Filter 'Pace vs STLY' (G) by size: over 10%, then 5-10%, then under 5% "
+    "4. Filter 'Review Bucket' (V) for 'Within Window' -- Suggested Bump "
+    "already holds any price-up here automatically; just confirm nothing "
+    "needs a cut.",
+    "5. Filter 'Pace vs STLY' (G) by size: over 10%, then 5-10%, then under 5% "
     "-- treat similarly-sized moves the same way.",
-    "5. Filter Pickup 3d/7d/14d (H:J) for a spike -- catches dates that may "
+    "6. Filter 'Pickup 7d' (H) for a spike -- catches dates that may "
     "need a temporary bump.",
-    "6. Filter 'Median Booking Window' (U, highlighted blue) for dates within "
-    "the booking window -- normalize/remove price-ups as a date moves inside it.",
     "7. Flag dates with multiple nearby low-occupancy dates for a possible LOS "
     "discount (tracked separately, not on this sheet).",
 ]

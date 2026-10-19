@@ -83,6 +83,31 @@ convention):
 - 2026-09-26: a "Stale Note" tier on Review Bucket reads the note's own
   leading "M/D - ..." date (the convention the user's notes and Suggested
   Note both already use) rather than a separate manually-maintained field.
+- 2026-10-19: three changes from a design discussion with the user about
+  automating more of his own review routine, each either a hard rule he
+  stated with conviction or a correctness fix -- the ones he described
+  as his own judgment calls (mid-tier pace gated by LY level) were
+  deliberately left alone rather than encoded, on his own observation
+  that he was "getting artsy" trying to state them as thresholds.
+  (1) Suggested Bump now holds ALL positive pushes once a date is inside
+  its median booking window, not just the narrow pickup-spike case it
+  used to catch -- previously an ahead-of-pace date within the window
+  still got a raise suggested, which the user explicitly didn't want
+  ("that's the time to just be within the market"). This also resolves
+  a real conflict with the pace ladder (pace >10% ahead would otherwise
+  suggest a raise too) in the user's stated priority: window proximity
+  wins. Suggested Note and Review Bucket (which promoted "Within Window"
+  above the pace tiers it now supersedes) were updated to match, so
+  neither ever contradicts Suggested Bump's actual "Hold."
+  (2) The far-out hold's LY bar (config.THRESHOLDS) is now weekday/
+  weekend-aware instead of a flat 85% -- the user wants to resist
+  cutting a far-out, mildly-behind date unless LY was genuinely weak for
+  that specific day type, not just "not elite." 40%/60% are his own
+  starting numbers, not yet checked against this account's live LY
+  distribution the way the F-column bands were.
+  (3) config.DAILY_REVIEW_STEPS's column letters, stale since several
+  earlier reorders (X/W/U no longer matched reality), were corrected,
+  and step order updated to match Review Bucket's new priority.
 """
 
 import argparse
@@ -197,7 +222,7 @@ THRESHOLD_ROWS = [
     (13, "Low-LY override: Pace >=", "low_ly_override_pace"),
     (14, "High-LY raise-ease LY >=", "high_ly_raise_ease_threshold_pct"),
     (15, "High-LY raise-ease ratio bar", "high_ly_raise_ease_ratio_bar"),
-    (16, "Far-out hold: LY >=", "far_out_hold_ly_threshold_pct"),
+    (16, "Far-out hold: Weekday LY >=", "far_out_hold_weekday_ly_threshold_pct"),
     (17, "Far-out hold: booking-window multiple", "far_out_hold_booking_window_multiple"),
     (18, "Far-out hold: max behind-pace", "far_out_hold_max_behind_pace"),
     (19, "Low-LY cut amount", "low_ly_cut_percent"),
@@ -208,6 +233,7 @@ THRESHOLD_ROWS = [
     (24, "Compset weekend green >", "compset_weekend_green_above"),
     (25, "Compset weekend dark green >", "compset_weekend_dark_green_above"),
     (26, "Compset vs Mkt Occ gap >", "compset_vs_market_gap_pts"),
+    (27, "Far-out hold: Weekend LY >=", "far_out_hold_weekend_ly_threshold_pct"),
 ]
 THRESHOLD_HEADER_ROW = 1
 THRESHOLD_LABEL_COL, THRESHOLD_VALUE_COL = "X", "Y"
@@ -244,18 +270,38 @@ def _low_ly_condition(r):
     return f"AND({ly}<IF({weekend},$Y$12,$Y$11),{pace}<$Y$13)"
 
 
+def _within_window_condition(r):
+    """Shared between Suggested Bump and Suggested Note (same reasoning
+    as _low_ly_condition) -- today's date sits inside the typical
+    booking lead time for its month.
+    """
+    t, u = f"{COL['days_out']}{r}", f"{COL['median_booking_window']}{r}"
+    return f"AND({t}>=0,{t}<={u})"
+
+
 def _suggested_bump_formula(r):
-    g, f, t, u, m, n = (f"{COL[c]}{r}" for c in (
+    g, f, t, u, m, n, weekday = (f"{COL[c]}{r}" for c in (
         "pace_vs_stly", "mkt_occ_ly", "days_out", "median_booking_window",
-        "pace_ratio", "pickup_ratio",
+        "pace_ratio", "pickup_ratio", "weekday",
     ))
     occ = f"{COL['occupancy']}{r}"
-    level7 = f'IF(OR({g}>$Y$2,{n}>1),IF(MAX({m},{n})>IF({f}>=$Y$14,$Y$15,2.5),20,IF(MAX({m},{n})>1.5,10,5))/100,"")'
-    level6 = f'IF(AND({n}>1,{g}<=$Y$2,{t}<={u}),"Hold - within booking window",{level7})'
-    level5 = f'IF({g}<-$Y$2,-IF({m}>2.5,20,IF({m}>1.5,10,5))/100,{level6})'
+    within_window = _within_window_condition(r)
+    # 2026-10-19: within the booking window, no positive push at all --
+    # the user wants to "just be within the market" close to the date,
+    # not keep pushing price up even if pace looks strong. This also
+    # resolves a conflict with the pace ladder below (pace>10% would
+    # otherwise suggest a raise): window proximity wins.
+    would_raise = f"OR({g}>$Y$2,{n}>1)"
+    raise_amount = f'IF(MAX({m},{n})>IF({f}>=$Y$14,$Y$15,2.5),20,IF(MAX({m},{n})>1.5,10,5))/100'
+    level7 = f'IF({would_raise},IF({within_window},"Hold - within booking window",{raise_amount}),"")'
+    level5 = f'IF({g}<-$Y$2,-IF({m}>2.5,20,IF({m}>1.5,10,5))/100,{level7})'
     level4 = f'IF(AND({g}<-$Y$2,{n}>1),"⚠ Mixed – review",{level5})'
+    # 2026-10-19: far-out hold's LY bar is weekday/weekend-aware now (was
+    # a flat 85%) -- the user wants to resist cutting a far-out, mildly-
+    # behind date unless LY was actually weak for that day type.
+    far_out_ly_threshold = f"IF({_weekend_fragment(weekday)},$Y$27,$Y$16)"
     level3 = (
-        f'IF(AND({f}>=$Y$16,IFERROR({t}>=$Y$17*{u},FALSE()),{g}<-$Y$2,{g}>=-$Y$18),'
+        f'IF(AND({f}>={far_out_ly_threshold},IFERROR({t}>=$Y$17*{u},FALSE()),{g}<-$Y$2,{g}>=-$Y$18),'
         f'"Hold - high LY, outside window",{level4})'
     )
     level2 = f'IF({_low_ly_condition(r)},-$Y$19/100,{level3})'
@@ -285,11 +331,17 @@ def _signal_formula(r):
 def _suggested_note_formula(r, note_prefix):
     g, n, weekday = f"{COL['pace_vs_stly']}{r}", f"{COL['pickup_ratio']}{r}", f"{COL['weekday']}{r}"
     applicable_ly_threshold = f"IF({_weekend_fragment(weekday)},$Y$12,$Y$11)"
+    # 2026-10-19: mirrors Suggested Bump's within-window hold so the two
+    # columns never contradict each other (Bump saying "Hold" while Note
+    # still describes an ahead-of-pace reason that isn't being acted on).
+    within_window = _within_window_condition(r)
+    would_raise = f"OR({g}>$Y$2,{n}>1)"
     return (
         f'=IF({_low_ly_condition(r)},"{note_prefix} - LY below "&{applicable_ly_threshold}&"%",'
         f'IF({g}<-$Y$2,"{note_prefix} - Pacing behind by "&TEXT({g},"0.00")&"%",'
+        f'IF(AND({would_raise},{within_window}),"{note_prefix} - Hold - within booking window",'
         f'IF({g}>$Y$2,"{note_prefix} - Pacing ahead by "&TEXT({g},"0.00")&"%",'
-        f'IF({n}>1,"{note_prefix} - Pickup demand spike",""))))'
+        f'IF({n}>1,"{note_prefix} - Pickup demand spike","")))))'
     )
 
 
@@ -375,11 +427,15 @@ def _review_bucket_formula(r):
     x, w = f"{COL['new_since_last_review']}{r}", f"{COL['override_status']}{r}"
     f, weekday = f"{COL['mkt_occ_ly']}{r}", f"{COL['weekday']}{r}"
     m, n = f"{COL['pace_ratio']}{r}", f"{COL['pickup_ratio']}{r}"
-    t, u = f"{COL['days_out']}{r}", f"{COL['median_booking_window']}{r}"
     weekend = _weekend_fragment(weekday)
     low_ly = f"{f}<IF({weekend},$Y$12,$Y$11)"
     high_ly = f"IF({weekend},{f}>=$Y$9,{f}>=$Y$6)"
     stale_note = _stale_note_condition(r)
+    within_window = _within_window_condition(r)
+    # 2026-10-19: "Within Window" moved up above the pace tiers it now
+    # supersedes (Suggested Bump holds any raise once inside the window,
+    # regardless of pace) -- this list should still read as the actual
+    # priority order, not the order these were originally added in.
     return (
         f'=IF({occ}=100,"✓ Booked",'
         f'IF({x}="NEW","1. New",'
@@ -387,10 +443,10 @@ def _review_bucket_formula(r):
         f'IF({stale_note},"2. Stale Note ("&$Y$10&"+d)",'
         f'IF({low_ly},"3. Low LY",'
         f'IF({high_ly},"3. High LY",'
-        f'IF({m}>2,"4. Pace >10%",'
-        f'IF({m}>1,"4. Pace 5-10%",'
-        f'IF({n}>1,"5. Pickup Spike",'
-        f'IF(AND({t}>=0,{t}<={u}),"6. Within Window",'
+        f'IF({within_window},"4. Within Window",'
+        f'IF({m}>2,"5. Pace >10%",'
+        f'IF({m}>1,"5. Pace 5-10%",'
+        f'IF({n}>1,"6. Pickup Spike",'
         '""))))))))))'
     )
 

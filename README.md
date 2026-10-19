@@ -500,19 +500,41 @@ the spec's own "(decided 9/11/26)" convention:
 
 - **2026-09-13**: Low-LY cut severity raised from a flat `-10%` to a new
   editable threshold, `THRESHOLDS["low_ly_cut_percent"]` (default `20`,
-  cell `AA31` on Daily Pacing) — goal is to be more aggressive on dates
-  already confirmed genuinely slow last year. Checked against the live
-  account's actual LY distribution first: the existing weekday/weekend
-  thresholds (25%/40%) land at roughly the same bottom ~20th percentile
-  for both day types, so raising the cut doesn't widen which dates get
-  caught, just how hard. (A bump to 30% for weekday was considered and
-  rejected — it would have swept in ~35% of weekday nights, roughly
-  doubling the rule's reach, versus ~21% at 25%.) Suggested Note gained a
-  matching `"<date> - LY below X%"` case — the reference file's own
-  formula never actually covered this, even though it's exactly the
-  reason text already seen on real historical overrides in the account
-  (e.g. `"8/23/26 - LY below 25%"`), so this closes a real gap alongside
-  the retune.
+  cell `Y19` on Daily Pacing as of the 2026-10-19 layout) — goal is to be
+  more aggressive on dates already confirmed genuinely slow last year.
+  Checked against the live account's actual LY distribution first: the
+  existing weekday/weekend thresholds (25%/40%) land at roughly the same
+  bottom ~20th percentile for both day types, so raising the cut doesn't
+  widen which dates get caught, just how hard. (A bump to 30% for
+  weekday was considered and rejected — it would have swept in ~35% of
+  weekday nights, roughly doubling the rule's reach, versus ~21% at
+  25%.) Suggested Note gained a matching `"<date> - LY below X%"` case —
+  the reference file's own formula never actually covered this, even
+  though it's exactly the reason text already seen on real historical
+  overrides in the account (e.g. `"8/23/26 - LY below 25%"`), so this
+  closes a real gap alongside the retune.
+- **2026-10-19**, from a design discussion on automating more of the
+  user's own daily review: **within the booking window, Suggested Bump
+  now holds every positive push, not just the narrow pickup-spike case
+  it used to catch.** Previously a date that was both ahead of pace and
+  inside its booking window still got a raise suggested; the user was
+  explicit that's exactly the time to stop pushing and "just be within
+  the market." This also settles a real conflict with the pace ladder
+  (pace 10+ points ahead would otherwise suggest a raise too) in his
+  stated priority: **window proximity wins over pace magnitude.**
+  Suggested Note and Review Bucket were updated to match (Review Bucket
+  promotes "Within Window" above the pace tiers it now supersedes), so
+  none of the three ever contradict each other. The far-out hold's LY
+  bar also went from a flat 85% to weekday/weekend-aware (`40%`/`60%`,
+  the user's own starting numbers — not yet checked against this
+  account's live LY distribution the way the F-column bands were): he
+  wants to resist cutting a far-out, mildly-behind date unless LY was
+  genuinely weak for that specific day type, not just "not elite."
+  Deliberately **not** changed: the user described a few other patterns
+  (mid-tier pace gated by LY level) as his own judgment calls rather
+  than hard rules — on his own observation that he was "getting artsy"
+  trying to state them as thresholds — so those stay unencoded, visible
+  only via the existing columns, same as before.
 
 ## Daily automation (Windows Task Scheduler)
 
