@@ -153,6 +153,30 @@ THRESHOLDS = {
     # meant to catch the rarer, more extreme case -- "4+ months out" in
     # his own words, not just "outside the window."
     "compset_far_out_booking_window_multiple": 3,
+    # 2026-11-06: Suggested Bump raise decay -- the user's own worry about
+    # a far-out raise sitting flat forever: "if I'm overpriced, then I
+    # just won't book, then I hit my window, then I lower my price,"
+    # sacrificing a good ADR only to cut hard once squeezed into the
+    # window. Raises only (cuts already have their own far-out-hold logic
+    # and don't carry the same "stuck overpriced" risk, per the user).
+    # Two step-downs keyed off the same median booking window the window
+    # gate already uses, so a raise fades on approach to the window
+    # instead of holding flat right up until the gate snaps it to zero:
+    # outside 1.5x the window, full raise; between 1.25x and 1.5x, 75% of
+    # it; inside 1.25x (but still outside the window itself), 50% of it.
+    # Ratios -- not a straight line to zero -- deliberately: the user
+    # confirmed PriceLabs' own base-price "Market driven premium" ramps
+    # up with distance from the date and then holds flat rather than
+    # vanishing at the horizon, so a hard floor here (never fully erasing
+    # the raise before the window gate takes over) fits that same shape
+    # better than decaying all the way to nothing. 20%->15%->10% are the
+    # user's own anchor numbers; stored as editable ratios (0.75/0.5)
+    # rather than hardcoded absolute percents so they still scale
+    # correctly against the 10%/5% raise tiers, not just the 20% one.
+    "raise_decay_far_multiple": 1.5,
+    "raise_decay_near_multiple": 1.25,
+    "raise_decay_far_ratio": 0.75,
+    "raise_decay_near_ratio": 0.5,
 }
 
 # 2026-10-11: the hand-maintained MEDIAN_BOOKING_WINDOW_BY_MONTH table (a

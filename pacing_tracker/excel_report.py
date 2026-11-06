@@ -108,6 +108,24 @@ convention):
   (3) config.DAILY_REVIEW_STEPS's column letters, stale since several
   earlier reorders (X/W/U no longer matched reality), were corrected,
   and step order updated to match Review Bucket's new priority.
+- 2026-11-06: Suggested Bump's raise branch now decays on approach to the
+  booking window (_raise_decay_factor) instead of holding perfectly flat
+  until the window gate snaps it to zero -- the user's own worry about
+  sitting overpriced, never booking, then being forced into an ugly
+  last-minute cut right at the window edge. Raises only, never the cut
+  branches, per his explicit instruction. Two step-downs (full raise
+  outside 1.5x the booking window, 75% between 1.25x-1.5x, 50% inside
+  1.25x but still outside the window) using his own anchor numbers
+  (20%->15%->10%), stored as editable multiples/ratios
+  (config.THRESHOLDS) rather than a hardcoded curve. Floors instead of
+  decaying to zero -- discussed with the user after he separately raised
+  PriceLabs' own base-price "Market driven premium" (ramps 0%->20% from
+  day 59 to day 234, then holds flat rather than vanishing): the two
+  layers are independent (this tool's percent override sits on top of
+  whatever base price PriceLabs already computed, premium included) so
+  this isn't redundant with it, but a floor here better matches
+  PriceLabs' own "fade, don't erase" shape at the far-out end than a
+  straight line to nothing would.
 """
 
 import argparse
@@ -235,6 +253,10 @@ THRESHOLD_ROWS = [
     (25, "Compset weekend dark green >", "compset_weekend_dark_green_above"),
     (26, "Compset vs Mkt Occ gap >", "compset_vs_market_gap_pts"),
     (27, "Far-out hold: Weekend LY >=", "far_out_hold_weekend_ly_threshold_pct"),
+    (28, "Raise decay: far booking-window multiple", "raise_decay_far_multiple"),
+    (29, "Raise decay: near booking-window multiple", "raise_decay_near_multiple"),
+    (30, "Raise decay: far-band ratio", "raise_decay_far_ratio"),
+    (31, "Raise decay: near-band ratio", "raise_decay_near_ratio"),
 ]
 THRESHOLD_HEADER_ROW = 1
 THRESHOLD_LABEL_COL, THRESHOLD_VALUE_COL = "X", "Y"
@@ -280,6 +302,25 @@ def _within_window_condition(r):
     return f"AND({t}>=0,{t}<={u})"
 
 
+def _raise_decay_factor(r):
+    """Tapers a far-out raise the closer a date gets to its own booking
+    window, instead of holding it perfectly flat until the window gate
+    (above) snaps it straight to zero. 2026-11-06, per the user's own
+    worry: sit at a flat raise, never book, then get dragged into the
+    window and forced into an ugly last-minute cut -- "slowly adjust
+    back" rather than stay flat then cliff. Two step-downs keyed off the
+    same median booking window the window gate already uses: outside
+    $Y$28x the window, no decay (factor 1); between $Y$29x and $Y$28x,
+    $Y$30 of the raise; inside $Y$29x (but still outside the window
+    itself -- the window gate handles that separately), $Y$31 of it.
+    Deliberately a floor, not a straight line to zero -- see config.py's
+    THRESHOLDS comment on why (PriceLabs' own far-out base-price ramp
+    holds flat rather than vanishing at the horizon).
+    """
+    t, u = f"{COL['days_out']}{r}", f"{COL['median_booking_window']}{r}"
+    return f"IFERROR(IF({t}>=$Y$28*{u},1,IF({t}>=$Y$29*{u},$Y$30,$Y$31)),1)"
+
+
 def _suggested_bump_formula(r):
     g, f, t, u, m, n, weekday = (f"{COL[c]}{r}" for c in (
         "pace_vs_stly", "mkt_occ_ly", "days_out", "median_booking_window",
@@ -293,7 +334,14 @@ def _suggested_bump_formula(r):
     # resolves a conflict with the pace ladder below (pace>10% would
     # otherwise suggest a raise): window proximity wins.
     would_raise = f"OR({g}>$Y$2,{n}>1)"
-    raise_amount = f'IF(MAX({m},{n})>IF({f}>=$Y$14,$Y$15,2.5),20,IF(MAX({m},{n})>1.5,10,5))/100'
+    # 2026-11-06: the raise itself decays on approach to the window (see
+    # _raise_decay_factor) -- applies only here, never to the cut
+    # branches below, per the user's explicit "this decay should only
+    # apply to price raises."
+    raise_amount = (
+        f'IF(MAX({m},{n})>IF({f}>=$Y$14,$Y$15,2.5),20,IF(MAX({m},{n})>1.5,10,5))/100'
+        f'*{_raise_decay_factor(r)}'
+    )
     level7 = f'IF({would_raise},IF({within_window},"Hold - within booking window",{raise_amount}),"")'
     level5 = f'IF({g}<-$Y$2,-IF({m}>2.5,20,IF({m}>1.5,10,5))/100,{level7})'
     level4 = f'IF(AND({g}<-$Y$2,{n}>1),"⚠ Mixed – review",{level5})'

@@ -574,6 +574,32 @@ the spec's own "(decided 9/11/26)" convention:
   than hard rules — on his own observation that he was "getting artsy"
   trying to state them as thresholds — so those stay unencoded, visible
   only via the existing columns, same as before.
+- **2026-11-06: Suggested Bump's raise decays on approach to the booking
+  window**, instead of holding perfectly flat right up until the window
+  gate above snaps it to zero. The user's own worry: a far-out raise
+  that just sits there, doesn't book, and then gets dragged into the
+  window and forced into an ugly last-minute cut — "slowly adjust back"
+  rather than stay flat then fall off a cliff. Two step-downs, keyed off
+  the same median booking window the window gate already uses: outside
+  `raise_decay_far_multiple`× the window (default `1.5`), no decay;
+  between `raise_decay_near_multiple`× and that (default `1.25`–`1.5`×),
+  the raise is cut to `raise_decay_far_ratio` of itself (default `0.75`,
+  e.g. 20%→15%); inside `raise_decay_near_multiple`× but still outside
+  the window itself, `raise_decay_near_ratio` (default `0.5`, e.g.
+  20%→10%) — the user's own anchor numbers. Applies **only** to raises,
+  never to the cut branches, per his explicit instruction ("this decay
+  should only apply to price raises"). Deliberately a **floor, not a
+  straight line to zero**: when he raised this he separately noted
+  PriceLabs' own base-price algorithm already has a "Market driven
+  premium" that ramps 0%→20% from day 59 to day 234 out and then *holds
+  flat* rather than vanishing at the far-out end. That ramp and this
+  decay aren't duplicates — PriceLabs' premium adjusts the base price by
+  days-until-stay alone, while this tool's raise is a separate percent
+  layered on top, driven by this sheet's own pace/LY/compset signal, not
+  by days-out — but a floor here matches PriceLabs' own "fade, don't
+  erase" shape at the horizon better than decaying this tool's raise all
+  the way to nothing would. All four numbers are editable in the
+  threshold block (`Y28`–`Y31`), same as everything else on this sheet.
 
 ## Daily automation (Windows Task Scheduler)
 

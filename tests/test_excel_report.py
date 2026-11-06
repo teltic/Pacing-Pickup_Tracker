@@ -36,7 +36,8 @@ EXPECTED_SUGGESTED_BUMP_ROW2 = (
     '"⚠ Mixed – review",IF(G2<-$Y$2,-IF(J2>2.5,20,IF(J2>1.5,10,5))/100,'
     'IF(OR(G2>$Y$2,K2>1),IF(AND(Q2>=0,Q2<=R2),"Hold - within booking window",'
     'IF(MAX(J2,K2)>IF(F2>=$Y$14,$Y$15,2.5),20,'
-    'IF(MAX(J2,K2)>1.5,10,5))/100),""))))))'
+    'IF(MAX(J2,K2)>1.5,10,5))/100*IFERROR(IF(Q2>=$Y$28*R2,1,'
+    'IF(Q2>=$Y$29*R2,$Y$30,$Y$31)),1)),""))))))'
 )
 EXPECTED_SIGNAL_ROW2 = (
     '=IF(C2=100,"✓ Booked",TRIM(IF(G2>$Y$2,"▲ Ahead ","")&IF(G2<-$Y$2,"▼ Behind ","")&IF(H2>$Y$3,"⚡ Spike ","")&IF(I2-D2>$Y$26,"🔥 Comp Hot ","")&IF(D2-I2>$Y$26,"🧊 Comp Cold ","")&IF(AND(IFERROR(Q2>=$Y$20*R2,FALSE()),IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),I2>$Y$24,I2>$Y$21)),"🎪 Early Demand ","")))'
@@ -223,7 +224,8 @@ class WithinWindowSuppressesRaisesTest(unittest.TestCase):
         bump = _suggested_bump_formula(2)
         self.assertIn(
             'IF(AND(Q2>=0,Q2<=R2),"Hold - within booking window",'
-            "IF(MAX(J2,K2)>IF(F2>=$Y$14,$Y$15,2.5),20,IF(MAX(J2,K2)>1.5,10,5))/100)",
+            "IF(MAX(J2,K2)>IF(F2>=$Y$14,$Y$15,2.5),20,IF(MAX(J2,K2)>1.5,10,5))/100"
+            "*IFERROR(IF(Q2>=$Y$28*R2,1,IF(Q2>=$Y$29*R2,$Y$30,$Y$31)),1))",
             bump,
         )
 
@@ -253,6 +255,41 @@ class FarOutHoldTest(unittest.TestCase):
         ws = wb["Daily Pacing"]
         self.assertEqual(ws["Y16"].value, config.THRESHOLDS["far_out_hold_weekday_ly_threshold_pct"])
         self.assertEqual(ws["Y27"].value, config.THRESHOLDS["far_out_hold_weekend_ly_threshold_pct"])
+
+
+class RaiseDecayTest(unittest.TestCase):
+    def test_decay_factor_only_appears_on_the_raise_branch(self):
+        # 2026-11-06: the user was explicit -- "this decay should only
+        # apply to price raises." The cut branches (-$Y$19/100 low-LY,
+        # the behind-pace cut's -IF(...)/100) must stay untouched.
+        bump = _suggested_bump_formula(2)
+        self.assertIn("$Y$28", bump)
+        self.assertIn("$Y$29", bump)
+        self.assertIn("$Y$30", bump)
+        self.assertIn("$Y$31", bump)
+        self.assertNotIn("-$Y$19/100*IFERROR", bump)
+        self.assertNotIn("-IF(J2>2.5,20,IF(J2>1.5,10,5))/100*IFERROR", bump)
+
+    def test_decay_uses_the_same_median_booking_window_as_the_window_gate(self):
+        bump = _suggested_bump_formula(2)
+        self.assertIn("IFERROR(IF(Q2>=$Y$28*R2,1,IF(Q2>=$Y$29*R2,$Y$30,$Y$31)),1)", bump)
+
+    def test_threshold_block_has_the_decay_multiples_and_ratios(self):
+        wb = build_workbook([_sample_record("2026-09-12")], date(2026, 9, 12), {})
+        ws = wb["Daily Pacing"]
+        self.assertEqual(ws["Y28"].value, config.THRESHOLDS["raise_decay_far_multiple"])
+        self.assertEqual(ws["Y29"].value, config.THRESHOLDS["raise_decay_near_multiple"])
+        self.assertEqual(ws["Y30"].value, config.THRESHOLDS["raise_decay_far_ratio"])
+        self.assertEqual(ws["Y31"].value, config.THRESHOLDS["raise_decay_near_ratio"])
+
+    def test_defaults_match_the_users_own_20_to_15_to_10_anchors(self):
+        # The user's own worked example: a 20% raise becomes 15% between
+        # 1.25x-1.5x the window, and 10% inside 1.25x (but still outside
+        # the window itself).
+        self.assertEqual(config.THRESHOLDS["raise_decay_far_multiple"], 1.5)
+        self.assertEqual(config.THRESHOLDS["raise_decay_near_multiple"], 1.25)
+        self.assertAlmostEqual(0.20 * config.THRESHOLDS["raise_decay_far_ratio"], 0.15)
+        self.assertAlmostEqual(0.20 * config.THRESHOLDS["raise_decay_near_ratio"], 0.10)
 
 
 class LowLyCutTest(unittest.TestCase):
