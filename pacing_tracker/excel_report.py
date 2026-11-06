@@ -226,10 +226,11 @@ THRESHOLD_ROWS = [
     (17, "Far-out hold: booking-window multiple", "far_out_hold_booking_window_multiple"),
     (18, "Far-out hold: max behind-pace", "far_out_hold_max_behind_pace"),
     (19, "Low-LY cut amount", "low_ly_cut_percent"),
-    (20, "Compset weekday gold >", "compset_weekday_gold_above"),
+    # 2026-11-06: row 20 used to be the "gold" tier's threshold, dropped
+    # (see config.THRESHOLDS) -- reused here rather than left blank.
+    (20, "Compset far-out: booking-window multiple", "compset_far_out_booking_window_multiple"),
     (21, "Compset weekday green >", "compset_weekday_green_above"),
     (22, "Compset weekday dark green >", "compset_weekday_dark_green_above"),
-    (23, "Compset weekend gold >", "compset_weekend_gold_above"),
     (24, "Compset weekend green >", "compset_weekend_green_above"),
     (25, "Compset weekend dark green >", "compset_weekend_dark_green_above"),
     (26, "Compset vs Mkt Occ gap >", "compset_vs_market_gap_pts"),
@@ -317,13 +318,24 @@ def _signal_formula(r):
     # either way is a demand signal worth seeing; advisory only (no
     # Suggested Bump change) until it's been watched for a while.
     mkt, compset = (f"{COL[c]}{r}" for c in ("mkt_occ", "compset_occupancy"))
+    # Early Demand (2026-11-06): the user's own insight -- the SAME
+    # compset occupancy level means something different depending on
+    # timing. High occupancy 3 weeks out is just a normal weekend filling
+    # in; high occupancy months out is the rare, real signal (he'd
+    # independently spotted a known tournament this way, just by eye).
+    # Reuses the already-tuned green cutoff (the lowest surviving tier,
+    # after the noisy gold tier was dropped) rather than a separate bar.
+    t, u, weekday = (f"{COL[c]}{r}" for c in ("days_out", "median_booking_window", "weekday"))
+    is_far_out = f"IFERROR({t}>=$Y$20*{u},FALSE())"
+    compset_notable = f"IF({_weekend_fragment(weekday)},{compset}>$Y$24,{compset}>$Y$21)"
     return (
         f'=IF({occ}=100,"✓ Booked",TRIM('
         f'IF({g}>$Y$2,"▲ Ahead ","")&'
         f'IF({g}<-$Y$2,"▼ Behind ","")&'
         f'IF({h}>$Y$3,"⚡ Spike ","")&'
         f'IF({compset}-{mkt}>$Y$26,"🔥 Comp Hot ","")&'
-        f'IF({mkt}-{compset}>$Y$26,"🧊 Comp Cold ","")'
+        f'IF({mkt}-{compset}>$Y$26,"🧊 Comp Cold ","")&'
+        f'IF(AND({is_far_out},{compset_notable}),"🎪 Early Demand ","")'
         f"))"
     )
 
@@ -388,11 +400,22 @@ def _new_since_last_review_formula(r, previous_signal):
     # incident in carryforward.py's module docstring).
     previous_signal = previous_signal if isinstance(previous_signal, str) else ""
     prev = previous_signal.replace('"', '""')
+    # 2026-11-06: says WHICH badge(s) just appeared instead of a bare
+    # "NEW" -- the user said plainly he couldn't tell what had actually
+    # changed without cross-checking every other column by hand. Checks
+    # the same badges Signal can show (now including Comp Hot/Cold, not
+    # just the original Ahead/Spike) and lists whichever ones are new.
+    # Review Bucket's own "is this NEW" check had to switch from an exact
+    # "=NEW" match to a prefix check to keep working once this stopped
+    # being a fixed string -- see _review_bucket_formula.
+    newly_appeared = []
+    for badge in ("Ahead", "Spike", "Comp Hot", "Comp Cold", "Early Demand"):
+        newly_appeared.append(
+            f'IF(AND(ISNUMBER(SEARCH("{badge}",{p})),NOT(ISNUMBER(SEARCH("{badge}","{prev}")))),"{badge} ","")'
+        )
+    joined = "&".join(newly_appeared)
     return (
-        f"=IF(OR("
-        f'AND(ISNUMBER(SEARCH("Ahead",{p})),NOT(ISNUMBER(SEARCH("Ahead","{prev}")))),'
-        f'AND(ISNUMBER(SEARCH("Spike",{p})),NOT(ISNUMBER(SEARCH("Spike","{prev}"))))'
-        f'),"NEW","")'
+        f'=IF(TRIM({joined})<>"","NEW: "&TRIM({joined}),"")'
     )
 
 
@@ -438,7 +461,7 @@ def _review_bucket_formula(r):
     # priority order, not the order these were originally added in.
     return (
         f'=IF({occ}=100,"✓ Booked",'
-        f'IF({x}="NEW","1. New",'
+        f'IF(LEFT({x},3)="NEW","1. New",'
         f'IF({w}="Review - pace normalized","2. Override Normalized",'
         f'IF({stale_note},"2. Stale Note ("&$Y$10&"+d)",'
         f'IF({low_ly},"3. Low LY",'
@@ -745,18 +768,15 @@ def _apply_conditional_formatting(ws, last_row):
     # skews heavily to weekend/event bookings. Below the "gold" cutoff is
     # left unfilled (nothing notable); above it, three bounded bands so
     # exactly one rule ever matches a given cell.
+    # 2026-11-06: the "gold" tier (below green) was dropped -- watched for
+    # a few weeks, ~50 dates lit up gold with no discernible pattern, while
+    # green/dark-green caught real signal. Below green now shows no fill.
     i_range = f"I2:I{last_row}"
-    ws.conditional_formatting.add(
-        i_range, FormulaRule(formula=[f"AND({not_weekend},I2>$Y$20,I2<=$Y$21)"], fill=fmt("light_gold"))
-    )
     ws.conditional_formatting.add(
         i_range, FormulaRule(formula=[f"AND({not_weekend},I2>$Y$21,I2<=$Y$22)"], fill=fmt("light_green"))
     )
     ws.conditional_formatting.add(
         i_range, FormulaRule(formula=[f"AND({not_weekend},I2>$Y$22)"], fill=fmt("dark_green"))
-    )
-    ws.conditional_formatting.add(
-        i_range, FormulaRule(formula=[f"AND({is_weekend},I2>$Y$23,I2<=$Y$24)"], fill=fmt("light_gold"))
     )
     ws.conditional_formatting.add(
         i_range, FormulaRule(formula=[f"AND({is_weekend},I2>$Y$24,I2<=$Y$25)"], fill=fmt("light_green"))

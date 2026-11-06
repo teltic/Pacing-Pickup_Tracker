@@ -39,8 +39,7 @@ EXPECTED_SUGGESTED_BUMP_ROW2 = (
     'IF(MAX(J2,K2)>1.5,10,5))/100),""))))))'
 )
 EXPECTED_SIGNAL_ROW2 = (
-    '=IF(C2=100,"✓ Booked",TRIM(IF(G2>$Y$2,"▲ Ahead ","")&IF(G2<-$Y$2,"▼ Behind ","")&'
-    'IF(H2>$Y$3,"⚡ Spike ","")&IF(I2-D2>$Y$26,"🔥 Comp Hot ","")&IF(D2-I2>$Y$26,"🧊 Comp Cold ","")))'
+    '=IF(C2=100,"✓ Booked",TRIM(IF(G2>$Y$2,"▲ Ahead ","")&IF(G2<-$Y$2,"▼ Behind ","")&IF(H2>$Y$3,"⚡ Spike ","")&IF(I2-D2>$Y$26,"🔥 Comp Hot ","")&IF(D2-I2>$Y$26,"🧊 Comp Cold ","")&IF(AND(IFERROR(Q2>=$Y$20*R2,FALSE()),IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),I2>$Y$24,I2>$Y$21)),"🎪 Early Demand ","")))'
 )
 EXPECTED_SUGGESTED_NOTE_ROW2 = (
     '=IF(AND(F2<IF(OR(ISNUMBER(SEARCH("Fri",B2)),ISNUMBER(SEARCH("Sat",B2))),$Y$12,$Y$11),'
@@ -61,8 +60,7 @@ EXPECTED_OVERRIDE_STATUS_ROW2 = (
     '"Review - pace normalized",""))'
 )
 EXPECTED_NEW_SINCE_LAST_REVIEW_ROW2 = (
-    '=IF(OR(AND(ISNUMBER(SEARCH("Ahead",M2)),NOT(ISNUMBER(SEARCH("Ahead","▼ Behind ⚡ Spike")))),'
-    'AND(ISNUMBER(SEARCH("Spike",M2)),NOT(ISNUMBER(SEARCH("Spike","▼ Behind ⚡ Spike"))))),"NEW","")'
+    '=IF(TRIM(IF(AND(ISNUMBER(SEARCH("Ahead",M2)),NOT(ISNUMBER(SEARCH("Ahead","▼ Behind ⚡ Spike")))),"Ahead ","")&IF(AND(ISNUMBER(SEARCH("Spike",M2)),NOT(ISNUMBER(SEARCH("Spike","▼ Behind ⚡ Spike")))),"Spike ","")&IF(AND(ISNUMBER(SEARCH("Comp Hot",M2)),NOT(ISNUMBER(SEARCH("Comp Hot","▼ Behind ⚡ Spike")))),"Comp Hot ","")&IF(AND(ISNUMBER(SEARCH("Comp Cold",M2)),NOT(ISNUMBER(SEARCH("Comp Cold","▼ Behind ⚡ Spike")))),"Comp Cold ","")&IF(AND(ISNUMBER(SEARCH("Early Demand",M2)),NOT(ISNUMBER(SEARCH("Early Demand","▼ Behind ⚡ Spike")))),"Early Demand ",""))<>"","NEW: "&TRIM(IF(AND(ISNUMBER(SEARCH("Ahead",M2)),NOT(ISNUMBER(SEARCH("Ahead","▼ Behind ⚡ Spike")))),"Ahead ","")&IF(AND(ISNUMBER(SEARCH("Spike",M2)),NOT(ISNUMBER(SEARCH("Spike","▼ Behind ⚡ Spike")))),"Spike ","")&IF(AND(ISNUMBER(SEARCH("Comp Hot",M2)),NOT(ISNUMBER(SEARCH("Comp Hot","▼ Behind ⚡ Spike")))),"Comp Hot ","")&IF(AND(ISNUMBER(SEARCH("Comp Cold",M2)),NOT(ISNUMBER(SEARCH("Comp Cold","▼ Behind ⚡ Spike")))),"Comp Cold ","")&IF(AND(ISNUMBER(SEARCH("Early Demand",M2)),NOT(ISNUMBER(SEARCH("Early Demand","▼ Behind ⚡ Spike")))),"Early Demand ","")),"")'
 )
 
 
@@ -158,6 +156,22 @@ class FormulaRegressionTest(unittest.TestCase):
         self.assertIn('SEARCH("Ahead","")', result)
         self.assertIn('SEARCH("Spike","")', result)
 
+    def test_new_since_last_review_says_which_badge_is_new(self):
+        # 2026-11-06: the user said plainly he couldn't tell what had
+        # changed from a bare "NEW" -- this must say which badge(s)
+        # newly appeared, prefixed "NEW: " so Review Bucket's prefix
+        # check (not an exact "=NEW" match anymore) still catches it.
+        result = _new_since_last_review_formula(2, "")
+        self.assertTrue(result.startswith('=IF(TRIM('))
+        self.assertIn('"NEW: "&TRIM(', result)
+        for badge in ("Ahead", "Spike", "Comp Hot", "Comp Cold", "Early Demand"):
+            self.assertIn(f'"{badge}"', result)
+
+    def test_review_bucket_matches_new_by_prefix_not_exact_string(self):
+        result = _review_bucket_formula(2)
+        self.assertIn('LEFT(U2,3)="NEW"', result)
+        self.assertNotIn('U2="NEW"', result)
+
     def test_signal_and_suggested_bump_have_no_elevated_30_60d_branch(self):
         # 2026-10-07: Pickup 30d/60d are gone (no pasted source for them)
         # -- the "Elevated 30/60d"/"+5% (watch)" branches that depended on
@@ -174,6 +188,29 @@ class FormulaRegressionTest(unittest.TestCase):
         self.assertIn('IF(D2-I2>$Y$26,"🧊 Comp Cold ","")', result)
         self.assertNotIn("C2-I2", result)
         self.assertNotIn("I2-C2", result)
+
+
+class EarlyDemandSignalTest(unittest.TestCase):
+    def test_requires_both_far_out_timing_and_notable_compset_occupancy(self):
+        # 2026-11-06: the user's own insight -- the same compset occupancy
+        # level means something different depending on timing (high occ
+        # 3 weeks out is a normal weekend; high occ months out is rare and
+        # real, e.g. a tournament he'd spotted by eye). Must require BOTH,
+        # not either alone, and use the (already-tuned) green cutoff, not
+        # a new one.
+        result = _signal_formula(2)
+        self.assertIn("🎪 Early Demand", result)
+        self.assertIn("IFERROR(Q2>=$Y$20*R2,FALSE())", result)  # far-out timing
+        self.assertIn("I2>$Y$24", result)  # weekend green cutoff
+        self.assertIn("I2>$Y$21", result)  # weekday green cutoff
+
+    def test_uses_a_separate_multiple_from_far_out_hold(self):
+        # Deliberately not the same $Y$17 far_out_hold_booking_window_multiple
+        # -- this is meant to catch a rarer, more extreme case ("4+ months
+        # out" in the user's words), not just "outside the window."
+        result = _signal_formula(2)
+        self.assertIn("$Y$20", result)
+        self.assertNotIn("$Y$17*", result)
 
 
 class WithinWindowSuppressesRaisesTest(unittest.TestCase):
@@ -449,18 +486,21 @@ class BuildWorkbookTest(unittest.TestCase):
             if str(rng.sqref).startswith("I2")
             for rule in rules
         ]
-        self.assertEqual(len(formulas), 6)
+        # 2026-11-06: the "gold" tier was dropped after a few weeks of
+        # live use showed it was just noise -- only green/dark-green
+        # survive now, 2 bands per day type instead of 3.
+        self.assertEqual(len(formulas), 4)
         weekday_formulas = [f for f in formulas if "NOT(OR(ISNUMBER" in f]
         weekend_formulas = [f for f in formulas if f not in weekday_formulas]
-        self.assertEqual(len(weekday_formulas), 3)
-        self.assertEqual(len(weekend_formulas), 3)
+        self.assertEqual(len(weekday_formulas), 2)
+        self.assertEqual(len(weekend_formulas), 2)
         joined = " ".join(formulas)
-        self.assertIn("I2>$Y$20,I2<=$Y$21", joined)  # weekday gold
         self.assertIn("I2>$Y$21,I2<=$Y$22", joined)  # weekday green
         self.assertIn("I2>$Y$22", joined)  # weekday dark green
-        self.assertIn("I2>$Y$23,I2<=$Y$24", joined)  # weekend gold
         self.assertIn("I2>$Y$24,I2<=$Y$25", joined)  # weekend green
         self.assertIn("I2>$Y$25", joined)  # weekend dark green
+        self.assertNotIn("$Y$20", joined)  # not a color band anymore (repurposed)
+        self.assertNotIn("$Y$23", joined)  # old weekend gold cutoff, removed
 
     def test_review_bucket_short_circuits_when_fully_booked(self):
         result = _review_bucket_formula(2)

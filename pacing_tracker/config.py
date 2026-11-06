@@ -124,14 +124,15 @@ THRESHOLDS = {
     # weekday/weekend scaled separately -- the user's comp set is 3-5BR
     # pool/large-group homes, which skew heavily to weekend/event bookings,
     # so (like Mkt Occ % LY) a flat threshold would make weekdays look
-    # "normal" always and miss real weekend signal. Starting points, not
-    # yet checked against this specific column's live distribution the
-    # way Mkt Occ % LY's bands were -- tune after a couple weeks of real
-    # data the same way.
-    "compset_weekday_gold_above": 20,
+    # "normal" always and miss real weekend signal.
+    # 2026-11-06: the original "gold" tier (20-50% weekday, 40-70% weekend)
+    # was dropped entirely after the user watched it for a few weeks --
+    # ~50 dates lit up gold with no discernible pattern ("I don't get
+    # value there"), while the surviving green/dark-green tiers correctly
+    # caught real signal (a known tournament, actual busy weekends). Below
+    # green now shows no fill at all, same as "nothing notable."
     "compset_weekday_green_above": 50,
     "compset_weekday_dark_green_above": 80,
-    "compset_weekend_gold_above": 40,
     "compset_weekend_green_above": 70,
     "compset_weekend_dark_green_above": 90,
     # How many points Compset Occupancy must lead or trail Mkt Occ % by
@@ -141,6 +142,17 @@ THRESHOLDS = {
     # is worth seeing, but advisory only (no Suggested Bump change yet)
     # until he's watched it fire for a while and trusts it.
     "compset_vs_market_gap_pts": 30,
+    # 2026-11-06: "Early Demand" signal (Signal badge) -- Compset
+    # Occupancy already notably high (the green tier above) AND the date
+    # is unusually far outside its own booking window. The user's own
+    # insight: the SAME compset occupancy level means something different
+    # depending on timing -- high occupancy 3 weeks out is just a normal
+    # weekend filling in, but high occupancy months out is a real signal
+    # (he'd independently spotted a known tournament this way by eye).
+    # A separate, larger multiple than far_out_hold's (2x) since this is
+    # meant to catch the rarer, more extreme case -- "4+ months out" in
+    # his own words, not just "outside the window."
+    "compset_far_out_booking_window_multiple": 3,
 }
 
 # 2026-10-11: the hand-maintained MEDIAN_BOOKING_WINDOW_BY_MONTH table (a

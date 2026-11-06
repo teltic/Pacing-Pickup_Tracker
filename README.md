@@ -156,6 +156,14 @@ would make weekdays look "normal" always. Starting points (20/50/80
 weekday, 40/70/90 weekend), not yet checked against this column's own
 live distribution — tune after a couple weeks of real data.
 
+**2026-11-06: the "gold" tier was dropped** after the user actually
+watched it for a few weeks — ~50 dates lit up gold with no discernible
+pattern ("I don't get value there, can't see an easy trend"), while
+green/dark-green correctly caught real signal (a known soccer
+tournament, actual busy weekends). Below green now shows no fill at all.
+Good example of a band that looked reasonable at design time but didn't
+earn its keep once there was real data to check it against.
+
 **Signal also gained a "🔥 Comp Hot"/"🧊 Comp Cold" badge**, comparing
 Compset Occupancy against Mkt Occ % (D) — **the broader market, not the
 user's own booked occupancy** (he was explicit about this: it's his
@@ -169,6 +177,19 @@ trusted; Compset Occupancy is brand new and he explicitly didn't want
 it driving decisions yet. If he later wants it in the ladder, the
 natural next step is folding the gap into the same 5/10/20% tiers
 Suggested Bump's pace/pickup ratios already use, not a parallel rule.
+
+**2026-11-06: a third badge, "🎪 Early Demand,"** fires when Compset
+Occupancy is already notably high (the green cutoff above) **and** the
+date sits unusually far outside its own booking window
+(`compset_far_out_booking_window_multiple`, default `3`× — deliberately
+a bigger multiple than the far-out LY hold's `2`×, since this is meant
+to catch the rarer, more extreme case). This encodes the user's own
+observation: the *same* compset occupancy number means something
+different depending on timing — high occupancy 3 weeks out is just a
+normal weekend filling in late, but high occupancy months out is a real
+signal (he'd independently spotted an actual tournament this way, just
+by eye, before this badge existed). Advisory only, same as Comp Hot/
+Cold.
 
 ### Trust guards that remain
 
@@ -238,6 +259,14 @@ A few things worth knowing about how it works:
   so it's really asking "does today's live Signal show something the
   snapshot from last time didn't." A date with no prior snapshot compares
   against `""`.
+- **2026-11-06: New Since Last Review now says which badge(s) are
+  new**, e.g. `"NEW: Spike"` or `"NEW: Comp Hot Early Demand"`, instead
+  of a bare `"NEW"` — the user said plainly he couldn't tell what had
+  actually changed without cross-checking every other column by hand.
+  Checks all five Signal badges now (Ahead/Spike/Comp Hot/Comp Cold/
+  Early Demand), not just the original Ahead/Spike. Because the cell no
+  longer always holds the literal string `"NEW"`, Review Bucket's own
+  check switched from an exact `="NEW"` match to `LEFT(...,3)="NEW"`.
 - `config.DRIVE_SYNC_FOLDER` should point at a folder synced by the Google
   Drive desktop app — this only ever touches plain files on disk, no
   Drive API/OAuth. Set via the `PACING_DRIVE_SYNC_FOLDER` env var (or in
