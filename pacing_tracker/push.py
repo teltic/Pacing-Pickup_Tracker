@@ -35,6 +35,17 @@ something else worth keeping, like min_stay -- confirmed live that a full
 delete wipes ALL of a date's fields, not just price) or fully deletes it
 via delete_listing_date_overrides (if price/reason were the only things
 on it).
+
+Fixed-dollar prices are protected (2026-11-06): if a date's *live*
+override is currently price_type "fixed" (set directly in PriceLabs, not
+by this tool), a non-blank Override Request for that same date is
+skipped rather than pushed -- _merge_override always forces price_type
+to "percent", so without this guard a stale/leftover Override Request
+value would silently replace a deliberate fixed-dollar decision with a
+plain percent adjustment the next time anyone ran a push. Skipped dates
+show up in the printed plan (both dry-run and real) so this is never
+silent; the user has to clear the fixed price in PriceLabs first if they
+actually want this tool managing that date.
 """
 
 import argparse
@@ -193,7 +204,18 @@ def push_overrides(client, planned, cleared_dates=None, listings=None, dry_run=T
 
         overrides_to_send = []
         for target_date, plan in planned_by_date.items():
-            merged = _merge_override(existing_by_date.get(target_date), target_date, plan["price"], plan["reason"])
+            existing = existing_by_date.get(target_date)
+            if existing is not None and existing.get("price_type") == "fixed":
+                # 2026-11-06: a fixed-dollar price set directly in PriceLabs
+                # (not by this tool) is a deliberate decision -- never
+                # silently replace it with a percent adjustment just
+                # because Override Request happens to be non-blank for
+                # that date. Skipped, not sent; the user has to clear the
+                # fixed price themselves (in PriceLabs) before this tool
+                # will touch that date again.
+                results.append((listing["name"], {"date": target_date, "protected_fixed_price": True}))
+                continue
+            merged = _merge_override(existing, target_date, plan["price"], plan["reason"])
             overrides_to_send.append(merged)
             results.append((listing["name"], merged))
 
@@ -268,6 +290,11 @@ def main():
     for listing_name, override in results:
         if override.get("deleted"):
             print(f"{listing_name} | {override['date']} | DELETE (no other fields worth keeping)")
+        elif override.get("protected_fixed_price"):
+            print(
+                f"{listing_name} | {override['date']} | SKIPPED -- live override is a fixed $ price, "
+                "not touched (clear it in PriceLabs first if you want this push to apply)"
+            )
         else:
             print(f"{listing_name} | {override['date']} | price={override['price']}% | reason={override['reason']!r}")
 

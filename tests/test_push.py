@@ -199,6 +199,33 @@ class PushOverridesTest(unittest.TestCase):
         ]
         self.planned = [{"date": "2026-09-12", "price": "-10", "reason": "behind pace"}]
 
+    def test_fixed_price_override_is_protected_not_overwritten(self):
+        # 2026-11-06: a fixed-dollar price set directly in PriceLabs is a
+        # deliberate decision -- a non-blank Override Request for that
+        # date must never silently replace it with a percent adjustment.
+        client = FakeClient(
+            existing_by_listing={
+                "L1": [{"date": "2026-09-12", "price": "200", "price_type": "fixed"}],
+            }
+        )
+        results = push_overrides(client, self.planned, listings=self.listings, dry_run=False)
+        l1_result = next(o for name, o in results if name == "Listing One")
+        self.assertTrue(l1_result.get("protected_fixed_price"))
+        # Nothing was sent for L1 -- only L2 (which has no existing override).
+        self.assertEqual(len(client.update_calls), 1)
+        self.assertEqual(client.update_calls[0][0], "L2")
+
+    def test_percent_override_is_still_updated_normally(self):
+        client = FakeClient(
+            existing_by_listing={
+                "L1": [{"date": "2026-09-12", "price": "5", "price_type": "percent"}],
+            }
+        )
+        results = push_overrides(client, self.planned, listings=self.listings, dry_run=False)
+        l1_result = next(o for name, o in results if name == "Listing One")
+        self.assertNotIn("protected_fixed_price", l1_result)
+        self.assertEqual(l1_result["price"], "-10")
+
     def test_dry_run_does_not_call_update(self):
         client = FakeClient(existing_by_listing={})
         results = push_overrides(client, self.planned, listings=self.listings, dry_run=True)

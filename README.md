@@ -334,6 +334,16 @@ workflow:
   `⚠ differs:` flag), the next push makes them identical. There's no
   per-listing notes field and no history kept in PriceLabs' own
   `reason` — only the sheet's own carried-forward Notes column has that.
+- **A fixed-dollar price is protected (2026-11-06).** If a date's *live*
+  override on PriceLabs is currently `price_type: "fixed"` (set directly
+  in PriceLabs, not by this tool), a non-blank Override Request for that
+  same date is **skipped, not pushed** — without this guard,
+  `_merge_override` would force it to `price_type: "percent"` like
+  everything else, silently replacing a deliberate fixed-dollar decision.
+  Shows up in the printed plan either way (`SKIPPED -- live override is a
+  fixed $ price`), dry-run or real, so it's never silent. Clear the fixed
+  price in PriceLabs first if you actually want this tool managing that
+  date again.
 - **Dry-run by default.** Nothing is ever written to PriceLabs unless you
   pass `--confirm`.
 - `--workbook` is optional — omit it and `push.py` finds the most recent
